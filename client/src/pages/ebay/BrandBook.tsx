@@ -25,7 +25,7 @@
  * cost of a wrong row is a missed pickup or a wasted one.
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Download, Gem, Lock, LockOpen, Plus, Search, Store, X } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Download, Gem, Lock, LockOpen, Plus, Search, Store, X } from 'lucide-react';
 import { EmptyState, ErrorState, LoadingState, SearchInput } from '../../components/ui';
 import { useApi, useDebouncedValue } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
@@ -59,6 +59,13 @@ const GROUPS: Array<{
       'Turned up in an import, not yet judged — or judged common with nothing specific to look for. Move each one to Rare or Common, or delete it.',
     icon: AlertTriangle,
   },
+  {
+    tier: 'not_worthy',
+    title: 'Not worth it',
+    blurb:
+      'Judged against its own sales and found wanting: the brand does not sell, and no model within it does either. Kept rather than deleted so it is not re-examined from scratch every scan — and so you can see what was ruled out.',
+    icon: Ban,
+  },
 ];
 
 /**
@@ -71,7 +78,8 @@ function brandBookText(book: EbayBrandBook): string {
   const lines = [
     'WHEELHOUSE BRAND BOOK',
     new Date().toLocaleString(),
-    `${book.counts.rare} rare · ${book.counts.common} common · ${book.counts.unsorted} unsorted`,
+    `${book.counts.rare} rare · ${book.counts.common} common · ${book.counts.unsorted} unsorted` +
+      `${book.counts.not_worthy ? ` · ${book.counts.not_worthy} not worth it` : ''}`,
   ];
 
   for (const { tier, title, blurb } of GROUPS) {
@@ -106,7 +114,9 @@ export function BrandBook() {
   const book = useApi<EbayBrandBook>('/ebay/brands', { search: query });
 
   const grouped = useMemo(() => {
-    const map = new Map<BrandTier, EbayBrand[]>([['rare', []], ['common', []], ['unsorted', []]]);
+    const map = new Map<BrandTier, EbayBrand[]>([
+      ['rare', []], ['common', []], ['unsorted', []], ['not_worthy', []],
+    ]);
     for (const brand of book.data?.brands ?? []) map.get(brand.tier)?.push(brand);
     return map;
   }, [book.data]);
@@ -222,6 +232,7 @@ export function BrandBook() {
         <p className="text-xs text-on-surface-muted sm:ml-auto" aria-live="polite">
           {book.data?.counts.rare ?? 0} rare · {book.data?.counts.common ?? 0} common ·{' '}
           {book.data?.counts.unsorted ?? 0} unsorted
+          {book.data?.counts.not_worthy ? ` · ${book.data.counts.not_worthy} not worth it` : ''}
         </p>
         <button
           type="button"
@@ -272,8 +283,10 @@ export function BrandBook() {
   );
 }
 
+// Deliberately brand-agnostic. The book holds hundreds of brands across categories, and
+// a placeholder naming one brand's models suggests the field wants that kind of answer.
 const LOOK_FOR_PLACEHOLDER =
-  'e.g. Jordan, SB Dunk, Kobe, Foamposite, desirable Air Max, ACG and collaborations';
+  'Models, lines, materials, era, country of make, or collaborations worth buying';
 
 function BrandRow({
   brand,
@@ -320,7 +333,7 @@ function BrandRow({
         <div className="ml-auto flex items-center gap-1">
           {/* Hidden rather than disabled while locked: a row of dead buttons invites the
               click that then does nothing, which reads as a bug rather than a pin. */}
-          {(brand.locked ? [] : (['rare', 'common', 'unsorted'] as BrandTier[]))
+          {(brand.locked ? [] : (['rare', 'common', 'unsorted', 'not_worthy'] as BrandTier[]))
             .filter((tier) => tier !== brand.tier)
             .map((tier) => (
               <button
@@ -339,7 +352,7 @@ function BrandRow({
                   onMove(brand, tier);
                 }}
               >
-                → {tier}
+                → {tier === 'not_worthy' ? 'not worth it' : tier}
               </button>
             ))}
           <button

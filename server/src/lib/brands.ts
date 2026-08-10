@@ -33,10 +33,10 @@
 import { db } from './db.js';
 import { nowIso } from './crud.js';
 
-export type Tier = 'rare' | 'common' | 'unsorted';
+export type Tier = 'rare' | 'common' | 'unsorted' | 'not_worthy';
 export type Verdict = 'worthy' | 'not_worthy';
 
-export const TIERS: Tier[] = ['rare', 'common', 'unsorted'];
+export const TIERS: Tier[] = ['rare', 'common', 'unsorted', 'not_worthy'];
 export const VERDICTS: Verdict[] = ['worthy', 'not_worthy'];
 
 /** How many observed prices a row keeps. Enough for a stable median, bounded so a
@@ -96,6 +96,11 @@ export function resolveTier(tier: Tier, lookFor: unknown): { tier: Tier; look_fo
   // Rare says the brand alone is the signal, so a model qualification would contradict
   // the tier. Drop it rather than store a fact the tier denies.
   if (tier === 'rare') return { tier: 'rare', look_for: null };
+
+  // Not worthy is a finding, not a gap: the sales were examined and neither the brand nor
+  // any model in it earned a pickup. It keeps whatever was learned, so a later scan that
+  // changes the picture starts from something rather than nothing.
+  if (tier === 'not_worthy') return { tier: 'not_worthy', look_for: description };
 
   // The rule, in one line: no description, no common.
   if (tier === 'common') {

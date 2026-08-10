@@ -17,7 +17,8 @@
  * last exactly until the next scan.
  */
 import { db } from './db.js';
-import { normaliseBrand } from './brands.js';
+import { normaliseBrand, resolveTier } from './brands.js';
+import { nowIso } from './crud.js';
 import { scoreBrand, type BrandStats } from './brand-strength.js';
 import { lookForFromModels, mineModels, type MinedModel } from './model-mining.js';
 
@@ -42,7 +43,7 @@ export interface BrandProposal {
   brandId: number;
   name: string;
   currentTier: string;
-  proposedTier: 'rare' | 'common' | 'unsorted';
+  proposedTier: 'rare' | 'common' | 'unsorted' | 'not_worthy';
   /** True when the proposal differs from what the book currently says. */
   changed: boolean;
   /** Set when the brand is locked by a human decision, and why it was left alone. */
@@ -130,6 +131,9 @@ export function analyseBrands(): BrandProposal[] {
 
     if (stats.strength === 'rare') {
       proposedTier = 'rare';
+    } else if (stats.strength === 'weak') {
+      // A finding, not a gap. 'unsorted' would claim nobody had looked.
+      proposedTier = 'not_worthy';
     } else if (stats.strength === 'common') {
       models = mineModels(listings, brand.name);
       lookFor = lookForFromModels(models);
@@ -138,8 +142,11 @@ export function analyseBrands(): BrandProposal[] {
       proposedTier = lookFor ? 'common' : 'unsorted';
     }
 
-    // Either an explicit pin or a tier a human already set. Both mean: do not touch.
-    const locked = brand.locked === 1 || brand.tier_source === 'manual';
+    /* Do not touch: an explicit pin, a tier a human set, or one the AI set. The scorer
+       is the fallback for when the AI is unavailable — it fills gaps rather than
+       arbitrating, because it cannot read a model out of a title and the AI can. */
+    const locked =
+      brand.locked === 1 || brand.tier_source === 'manual' || brand.tier_source === 'ai';
 
     return {
       brandId: brand.id,
@@ -156,6 +163,96 @@ export function analyseBrands(): BrandProposal[] {
 }
 
 /**
+ * Fold DeepSeek's verdicts into the book.
+ *
+ * The model decides the tier because it can see what the arithmetic cannot: that a
+ * brand's good sales all say "1460 Made in England" and its bad ones do not. The
+ * arithmetic is still what it was shown, so the two are looking at the same evidence.
+ *
+ * Locked and hand-judged brands are skipped here exactly as they are in applyProposals —
+ * a paid API is still not allowed to overrule a person.
+ */
+export function applyAiVerdicts(
+  verdicts: Array<{
+    name: string;
+    tier: 'rare' | 'common' | 'not_worthy';
+    models: string[];
+    lookFor: string | null;
+  }>,
+): { applied: number; skipped: number; created: number; models: number } {
+  const at = nowIso();
+  const select = db.prepare('SELECT id, tier_source, locked FROM ebay_brands WHERE slug = ?');
+  const insert = db.prepare(
+    `INSERT INTO ebay_brands (slug, name, tier, tier_source, look_for, first_seen, last_seen)
+     VALUES (@slug, @name, @tier, 'ai', @look_for, @at, @at)`,
+  );
+  const update = db.prepare(
+    `UPDATE ebay_brands
+        SET tier = @tier, look_for = @look_for, tier_source = 'ai', last_seen = @at
+      WHERE id = @id AND tier_source NOT IN ('manual') AND locked = 0`,
+  );
+
+  /* The models the AI judged worth picking up, stored as rows rather than only as text.
+     Rows are what the brand book can strike through one at a time when a model turns out
+     to be worthless — the text line cannot be corrected that finely.
+
+     verdict_source 'ai' so a hand-set verdict is recognisable and never overwritten. */
+  const upsertModel = db.prepare(
+    `INSERT INTO ebay_brand_models (brand_id, slug, name, verdict, verdict_source, first_seen, last_seen)
+     VALUES (@brand_id, @slug, @name, 'worthy', 'ai', @at, @at)
+     ON CONFLICT(brand_id, slug) DO UPDATE
+       SET name = excluded.name, last_seen = excluded.last_seen
+       WHERE ebay_brand_models.verdict_source <> 'manual'`,
+  );
+
+  let applied = 0;
+  let skipped = 0;
+  let created = 0;
+  let modelsWritten = 0;
+
+  const writeModels = (brandId: number, names: string[]) => {
+    for (const name of names) {
+      const modelSlug = normaliseBrand(name);
+      if (!modelSlug) continue;
+      upsertModel.run({ brand_id: brandId, slug: modelSlug, name, at });
+      modelsWritten += 1;
+    }
+  };
+
+  db.transaction(() => {
+    for (const verdict of verdicts) {
+      const slug = normaliseBrand(verdict.name);
+      if (!slug) { skipped += 1; continue; }
+
+      // The same rule every other door enforces: no description, no common.
+      const resolved = resolveTier(verdict.tier, verdict.lookFor);
+
+      const existing = select.get(slug) as
+        | { id: number; tier_source: string; locked: number }
+        | undefined;
+
+      if (!existing) {
+        insert.run({ slug, name: verdict.name, tier: resolved.tier, look_for: resolved.look_for, at });
+        const id = (db.prepare('SELECT id FROM ebay_brands WHERE slug = ?').get(slug) as { id: number }).id;
+        if (resolved.tier === 'common') writeModels(id, verdict.models);
+        created += 1;
+        applied += 1;
+        continue;
+      }
+
+      if (existing.locked === 1 || existing.tier_source === 'manual') { skipped += 1; continue; }
+      const info = update.run({ id: existing.id, tier: resolved.tier, look_for: resolved.look_for, at });
+      if (info.changes) {
+        if (resolved.tier === 'common') writeModels(existing.id, verdict.models);
+        applied += 1;
+      } else skipped += 1;
+    }
+  })();
+
+  return { applied, skipped, created, models: modelsWritten };
+}
+
+/**
  * Apply the proposals that are safe to apply without asking.
  *
  * Safe means: the brand carries no human decision, and the proposal does not create a
@@ -168,7 +265,7 @@ export function applyProposals(proposals: BrandProposal[]): { applied: number; s
         SET tier = @tier,
             look_for = @look_for,
             tier_source = 'evidence'
-      WHERE id = @id AND tier_source <> 'manual' AND locked = 0`,
+      WHERE id = @id AND tier_source NOT IN ('manual', 'ai') AND locked = 0`,
   );
 
   let applied = 0;

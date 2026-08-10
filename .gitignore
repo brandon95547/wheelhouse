@@ -5,3 +5,8 @@ data/
 *.db-shm
 *.db-wal
 .DS_Store
+
+# API keys. Never commit these — see server/.env.example for the shape.
+.env
+.env.*
+!.env.example

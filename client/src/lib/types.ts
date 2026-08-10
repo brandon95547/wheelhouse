@@ -183,7 +183,7 @@ export type OptionLists = Record<string, string[]>;
    materials, vintages, collaborations or editions pay, which is why a common brand
    always carries a `look_for`. `unsorted` is what an import found that no guide has
    judged — or judged common without being able to say what to look for. */
-export type BrandTier = 'rare' | 'common' | 'unsorted';
+export type BrandTier = 'rare' | 'common' | 'unsorted' | 'not_worthy';
 export type ModelVerdict = 'worthy' | 'not_worthy';
 
 export interface EbayBrandModel {
@@ -221,7 +221,7 @@ export interface EbayBrand {
 
 export interface EbayBrandBook {
   brands: EbayBrand[];
-  counts: { rare: number; common: number; unsorted: number };
+  counts: { rare: number; common: number; unsorted: number; not_worthy: number };
 }
 
 /* What the sold-price evidence says about a brand. Rank statistics only — see

@@ -18,7 +18,9 @@ import {
   resolveTier,
   upsertBrands,
 } from '../lib/brands.js';
-import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
+import { analyseBrands, applyAiVerdicts, applyProposals } from '../lib/brand-analysis.js';
+import { classifyListings } from '../lib/brand-ai.js';
+import { aiConfigured } from '../lib/deepseek.js';
 import { MIN_SAMPLE, RARE_GATES } from '../lib/brand-strength.js';
 
 const router: Router = Router();
@@ -132,7 +134,9 @@ router.get('/stats', (req, res) => {
  * Receives listings scraped from the page the user is already looking at.
  * Nothing here contacts eBay — the extension posts what was on screen.
  */
-router.post('/import', (req, res) => {
+// async: the AI classification below is awaited. Express 5 forwards a rejected handler
+// to the error middleware on its own, so no wrapper is needed.
+router.post('/import', async (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const category = resolveCategory(body.category ?? body.categorySlug ?? body.category_id);
 
@@ -196,9 +200,28 @@ router.post('/import', (req, res) => {
 
   const duplicates = valid.length - imported + duplicatesInBatch;
 
-  // New sales are new evidence, so the tiers are recomputed here rather than waiting for
-  // someone to ask. Manual judgements are untouched — see applyProposals.
-  const rescored = imported > 0 ? applyProposals(analyseBrands()) : { applied: 0, skipped: 0 };
+  /* New sales are new evidence, so the tiers are settled here rather than waiting for
+     someone to ask.
+
+     DeepSeek first, because it can read a brand out of a mangled title and the statistics
+     cannot. If it is unconfigured or unreachable the statistical scorer runs instead —
+     the import must not depend on a third party being up. */
+  let aiResult: { applied: number; skipped: number; created: number } | null = null;
+  let rescored = { applied: 0, skipped: 0 };
+
+  if (imported > 0) {
+    const batch = db
+      .prepare(
+        `SELECT title, sold_price FROM ebay_listings
+          WHERE category_id = ? AND sold_price IS NOT NULL
+          ORDER BY id DESC LIMIT 400`,
+      )
+      .all(category.id) as Array<{ title: string; sold_price: number }>;
+
+    const verdicts = await classifyListings(batch);
+    if (verdicts) aiResult = applyAiVerdicts(verdicts);
+    rescored = applyProposals(analyseBrands());
+  }
 
   res.status(201).json({
     found: rawListings.length,
@@ -206,13 +229,17 @@ router.post('/import', (req, res) => {
     duplicates,
     failed: failed.length,
     errors: failed.slice(0, 25),
-    retiered: rescored.applied,
+    retiered: rescored.applied + (aiResult?.applied ?? 0),
+    ai: aiResult ? { ...aiResult, used: true } : { used: false },
     category: { slug: category.slug, name: category.name, group: category.group_name },
     message:
       imported > 0
         ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.` +
+          (aiResult
+            ? ` ${aiResult.applied} brand${aiResult.applied === 1 ? '' : 's'} classified (${aiResult.created} new).`
+            : ' Brands tiered from sold prices — AI classification unavailable.') +
           (rescored.applied
-            ? ` ${rescored.applied} brand${rescored.applied === 1 ? '' : 's'} re-tiered on the new sales.`
+            ? ` ${rescored.applied} re-tiered on the numbers.`
             : '')
         : 'No new listings were imported.',
   });
@@ -278,6 +305,9 @@ router.get('/brands/analysis', (_req, res) => {
   const proposals = analyseBrands();
   res.json({
     gates: { rare: RARE_GATES, minSample: MIN_SAMPLE },
+    // Surfaced so the report can say whether tiers are coming from DeepSeek plus the
+    // numbers, or from the numbers alone. A silently degraded mode is a trap.
+    aiConfigured: aiConfigured(),
     proposals,
     counts: {
       rare: proposals.filter((p) => p.proposedTier === 'rare').length,
@@ -309,6 +339,7 @@ router.get('/brands', (req, res) => {
       rare: brands.filter((b) => b.tier === 'rare').length,
       common: brands.filter((b) => b.tier === 'common').length,
       unsorted: brands.filter((b) => b.tier === 'unsorted').length,
+      not_worthy: brands.filter((b) => b.tier === 'not_worthy').length,
     },
   });
 });
