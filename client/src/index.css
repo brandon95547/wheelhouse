@@ -96,15 +96,19 @@
    the bright tones cannot carry text on white. */
 :root {
   --wh-sys-background: #ffffff;
-  --wh-sys-on-background: #373d3e;
+  --wh-sys-on-background: var(--wh-ref-midnight-blue);
   --wh-sys-surface: #ffffff;
-  --wh-sys-on-surface: #373d3e;
+  /* The neutral ramp is core palette values, not derived greys: Midnight Blue,
+     the Surfaces overlay tone and Border Strong happen to land on a clean
+     10.98 / 6.07 / 5.31 against white, so light reads as the same family of
+     blue-greys as dark rather than as a separate greyscale. */
+  --wh-sys-on-surface: var(--wh-ref-midnight-blue);
   --wh-sys-surface-variant: var(--wh-ref-clouds);
-  --wh-sys-on-surface-variant: #576061;
-  --wh-sys-on-surface-muted: #656f70;
+  --wh-sys-on-surface-variant: var(--wh-ref-overlay);
+  --wh-sys-on-surface-muted: var(--wh-ref-border-strong);
   /* Disabled text is exempt from WCAG 1.4.3 ("inactive user interface
      components"), which is why this one is allowed below 4.5. */
-  --wh-sys-on-surface-disabled: #97a0a1;
+  --wh-sys-on-surface-disabled: var(--wh-ref-concrete);
   --wh-sys-surface-container: var(--wh-ref-clouds);
   --wh-sys-surface-container-high: #dfe4e5;
   --wh-sys-inverse-surface: var(--wh-ref-wet-asphalt);
@@ -187,9 +191,11 @@
    a change — each of those is listed in the header comment above. */
 .dark {
   --wh-sys-background: var(--wh-ref-midnight-blue);
-  --wh-sys-on-background: #edefef;
+  --wh-sys-on-background: var(--wh-ref-clouds);
   --wh-sys-surface: var(--wh-ref-wet-asphalt);
-  --wh-sys-on-surface: #edefef;
+  /* The sheet's Text Primary, used as given: Clouds clears AA on every surface
+     in the system (9.57 / 8.10 / 6.64 / 5.29), so there was nothing to derive. */
+  --wh-sys-on-surface: var(--wh-ref-clouds);
   --wh-sys-surface-variant: var(--wh-ref-elevated);
   --wh-sys-on-surface-variant: #d7dada;
   --wh-sys-on-surface-muted: #c3c8c8;
@@ -199,10 +205,17 @@
   --wh-sys-inverse-surface: var(--wh-ref-clouds);
   --wh-sys-on-inverse-surface: var(--wh-ref-midnight-blue);
 
-  /* Same reasoning as light: the sheet's Border #4A657F is 1.53:1 on Wet
-     Asphalt, so an input's edge all but disappears. Concrete reaches 3.33:1. */
+  /* outline-variant is the sheet's Border (#4A657F, "subtle border") used exactly
+     as specified: dividers and card edges are decoration, so its 1.53:1 against
+     Wet Asphalt is fine — WCAG does not govern them.
+
+     outline is the one that had to move. It draws the boundary of an INPUT, and
+     a field's fill is the same colour as the page behind it, so that border is
+     the only thing identifying the field as a field — which puts it under 1.4.11
+     at 3:1. Neither border tone reaches it (Border 1.53, Border Strong 1.75).
+     Concrete does, at 3.33, and is a core palette value. */
   --wh-sys-outline: var(--wh-ref-concrete);
-  --wh-sys-outline-variant: var(--wh-ref-border-strong);
+  --wh-sys-outline-variant: var(--wh-ref-overlay);
   --wh-sys-scrim: #060d13;
 
   --wh-sys-primary: var(--wh-ref-turquoise);
