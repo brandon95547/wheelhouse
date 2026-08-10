@@ -18,12 +18,11 @@
  * cost of a wrong row is a missed pickup or a wasted one.
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Gem, Plus, Search, Store, X } from 'lucide-react';
-import { Badge, EmptyState, ErrorState, LoadingState, SearchInput } from '../../components/ui';
+import { AlertTriangle, Check, Download, Gem, Plus, Search, Store, X } from 'lucide-react';
+import { EmptyState, ErrorState, LoadingState, SearchInput } from '../../components/ui';
 import { useApi, useDebouncedValue } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
 import { api } from '../../lib/api';
-import { formatMoney } from '../../lib/format';
 import type { BrandTier, EbayBrand, EbayBrandBook, ModelVerdict } from '../../lib/types';
 
 const GROUPS: Array<{
@@ -54,9 +53,44 @@ const GROUPS: Array<{
   },
 ];
 
+/**
+ * The book as plain text, for printing or reading on a phone in an aisle with no signal.
+ * Grouped and labelled the same way the page is, so the paper and the screen never
+ * disagree about what a brand is.
+ */
+function brandBookText(book: EbayBrandBook): string {
+  const rule = '='.repeat(60);
+  const lines = [
+    'WHEELHOUSE BRAND BOOK',
+    new Date().toLocaleString(),
+    `${book.counts.rare} rare · ${book.counts.common} common · ${book.counts.unsorted} unsorted`,
+  ];
+
+  for (const { tier, title, blurb } of GROUPS) {
+    const brands = book.brands.filter((brand) => brand.tier === tier);
+    if (!brands.length) continue;
+    lines.push('', rule, `${title.toUpperCase()} (${brands.length})`, blurb, rule, '');
+
+    for (const brand of brands) {
+      lines.push(brand.name);
+      if (brand.notes) lines.push(`    ${brand.notes}`);
+      // Only common brands turn on the model, so only they carry a model list.
+      if (tier === 'common') {
+        const worthy = brand.models.filter((m) => m.verdict === 'worthy');
+        const skip = brand.models.filter((m) => m.verdict === 'not_worthy');
+        if (worthy.length) lines.push(`    WORTH IT: ${worthy.map((m) => m.name).join(', ')}`);
+        if (skip.length) lines.push(`    SKIP:     ${skip.map((m) => m.name).join(', ')}`);
+      }
+    }
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
 export function BrandBook() {
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
   const query = useDebouncedValue(search, 250);
   const book = useApi<EbayBrandBook>('/ebay/brands', { search: query });
 
@@ -95,6 +129,28 @@ export function BrandBook() {
     }
   }
 
+  /* Exports the WHOLE book, not the current search. An export you have to remember to
+     clear the filter for is one that quietly lies to you later. */
+  async function exportBook() {
+    setExporting(true);
+    try {
+      const all = await api.get<EbayBrandBook>('/ebay/brands');
+      const url = URL.createObjectURL(
+        new Blob([brandBookText(all)], { type: 'text/plain;charset=utf-8' }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `wheelhouse-brand-book-${new Date().toISOString().slice(0, 10)}.txt`;
+      link.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${all.brands.length} brand${all.brands.length === 1 ? '' : 's'}.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not export the brand book.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   async function remove(brand: EbayBrand) {
     if (!window.confirm(`Remove ${brand.name} from the brand book?`)) return;
     try {
@@ -128,6 +184,15 @@ export function BrandBook() {
           {book.data?.counts.rare ?? 0} rare · {book.data?.counts.common ?? 0} common ·{' '}
           {book.data?.counts.unsorted ?? 0} unsorted
         </p>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={exportBook}
+          disabled={exporting}
+        >
+          <Download className="size-4" aria-hidden="true" />
+          {exporting ? 'Exporting…' : 'Export'}
+        </button>
       </div>
 
       {query && total === 0 ? (
@@ -192,17 +257,6 @@ function BrandRow({
     <li className="p-4">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-semibold text-on-surface">{brand.name}</span>
-        {brand.median_price !== null ? (
-          <span className="text-sm font-semibold text-success-text tabular-nums">
-            {formatMoney(brand.median_price)}
-          </span>
-        ) : null}
-        <span className="text-xs text-on-surface-muted">
-          {brand.sold_count} sold
-          {brand.rejected_count ? ` · ${brand.rejected_count} wrong model` : ''}
-          {brand.high_price ? ` · high ${formatMoney(brand.high_price)}` : ''}
-        </span>
-        {brand.tier_source === 'manual' ? <Badge tone="neutral">edited</Badge> : null}
 
         <div className="ml-auto flex items-center gap-1">
           {(['rare', 'common', 'unsorted'] as BrandTier[])
