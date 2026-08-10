@@ -172,14 +172,52 @@ export function analyseBrands(): BrandProposal[] {
  * Locked and hand-judged brands are skipped here exactly as they are in applyProposals —
  * a paid API is still not allowed to overrule a person.
  */
+interface AiVerdictInput {
+  name: string;
+  tier: 'rare' | 'common' | 'not_worthy';
+  models: string[];
+  lookFor: string | null;
+}
+
+/** Strongest first. A stray second mention must not demote a brand already judged well. */
+const TIER_RANK: Record<AiVerdictInput['tier'], number> = { rare: 3, common: 2, not_worthy: 1 };
+
+/**
+ * Collapse verdicts that are the same brand.
+ *
+ * One response can name a brand twice — "Nike" and "Nike Inc", or the same name returned
+ * in two chunks of a large batch. Both normalise to one slug, so without this the second
+ * silently overwrites the first and its models are lost.
+ */
+export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
+  const bySlug = new Map<string, AiVerdictInput & { modelSet: Set<string> }>();
+
+  for (const verdict of verdicts) {
+    const slug = normaliseBrand(verdict.name);
+    if (!slug) continue;
+
+    const existing = bySlug.get(slug);
+    if (!existing) {
+      bySlug.set(slug, { ...verdict, modelSet: new Set(verdict.models) });
+      continue;
+    }
+
+    for (const model of verdict.models) existing.modelSet.add(model);
+    // Keep the first usable description rather than the last, and the stronger tier.
+    if (!existing.lookFor && verdict.lookFor) existing.lookFor = verdict.lookFor;
+    if (TIER_RANK[verdict.tier] > TIER_RANK[existing.tier]) existing.tier = verdict.tier;
+  }
+
+  return [...bySlug.values()].map(({ modelSet, ...rest }) => ({
+    ...rest,
+    models: [...modelSet],
+  }));
+}
+
 export function applyAiVerdicts(
-  verdicts: Array<{
-    name: string;
-    tier: 'rare' | 'common' | 'not_worthy';
-    models: string[];
-    lookFor: string | null;
-  }>,
+  incoming: AiVerdictInput[],
 ): { applied: number; skipped: number; created: number; models: number } {
+  const verdicts = mergeVerdicts(incoming);
   const at = nowIso();
   const select = db.prepare('SELECT id, tier_source, locked FROM ebay_brands WHERE slug = ?');
   const insert = db.prepare(

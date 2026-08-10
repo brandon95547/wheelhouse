@@ -1,32 +1,21 @@
 /**
- * Classify a batch of imported sold listings into Rare / Common / Not worthy.
+ * Classify a scan's sold listings into Rare / Common / Not worthy, in ONE call.
  *
- * TWO PASSES, BECAUSE THE TWO HARD PARTS ARE HARD IN DIFFERENT WAYS.
+ * The whole batch goes to the model together, and that is the design rather than an
+ * economy. A brand cannot be judged one listing at a time: the question is whether its
+ * CHEAP sales are also worth money, which only exists in the shape of the whole set. Ten
+ * separate calls would each see a fragment and none would see the pattern — and would
+ * cost ten times as much to be worse.
  *
- *   Pass 1  EXTRACTION — read the titles, return the brand names present.
- *           A language problem. "Nke Air Jordn 1 Retro sz10 mens DS" is Nike to any
- *           reader and defeats every rule anyone wants to write. This is what the model
- *           is actually being paid for.
+ * An earlier version split this into an extraction pass and a judgement pass. It timed
+ * out: asking for every brand plus every misspelling of it across 120 titles produces a
+ * huge reply, the model exhausts its budget mid-JSON, the retry runs at triple the budget,
+ * and a second call follows. Three minutes on 151 listings, for an answer one call gives.
  *
- *   (code)  ATTRIBUTION AND ARITHMETIC — match listings to those names and compute the
- *           median, quartile and price shares. Once the NAMES are known, matching them is
- *           trivial, and percentiles over two hundred numbers are something a model
- *           cannot do reliably and a computer cannot do wrong.
- *
- *   Pass 2  JUDGEMENT — given each brand's real statistics AND its titles, answer the
- *           three questions that decide the tier, and write the "Look for" line.
- *           Interpreting numbers is fair to ask; deriving them is not.
- *
- * The split matters. A single pass asking "read these 200 listings and tell me if the
- * value is consistent" gets a fluent answer built on arithmetic the model guessed at,
- * and the whole point of the tier is that it is trustworthy.
- *
- * FAILURE IS NOT FATAL. Any pass returning null leaves the caller with the statistical
- * scorer, which needs no third party and was working before this file existed.
+ * FAILURE IS NOT FATAL. Returning null leaves the caller with the statistical scorer,
+ * which needs no third party. An import must never die because an API is down.
  */
 import { chatJSON, aiConfigured } from './deepseek.js';
-import { scoreBrand, type BrandStats } from './brand-strength.js';
-import { normaliseBrand } from './brands.js';
 
 export interface AiListing {
   title: string;
@@ -42,199 +31,116 @@ export interface AiBrandVerdict {
   models: string[];
   lookFor: string | null;
   reasoning: string;
-  stats: BrandStats;
-  listingCount: number;
-}
-
-/** Batching keeps one prompt inside a sane context and one failure cheap. */
-const EXTRACT_BATCH = 120;
-/** Titles shown per brand in pass 2. Enough to see the models; not the whole corpus. */
-const TITLE_SAMPLE = 40;
-/** Below this many sales a brand is not put to the model at all — see scoreBrand. */
-const MIN_FOR_JUDGEMENT = 8;
-/** Brands judged per call. A scan can turn up hundreds; one prompt cannot hold them. */
-const JUDGE_BATCH = 10;
-
-const EXTRACT_SYSTEM = `You identify BRAND NAMES in eBay listing titles for resale items.
-
-Return JSON in this shape:
-{"brands": [{"name": "<canonical brand name>", "variants": ["<spelling as it appears>", ...]}]}
-
-For each brand, "variants" must list EVERY spelling, misspelling, abbreviation and
-sub-line that actually appears in the titles you were given for that brand. This is the
-most important part of your answer: it is used to match listings back to the brand, and a
-spelling you omit means that listing is silently dropped from the brand's sales figures.
-
-Rules:
-- "name" is the brand's canonical name, correctly spelled, as a reseller would write it.
-  Use the full name when the brand has a longer official form rather than a short prefix.
-- "variants" must be lowercase, and each must be a literal run of words that appears in at
-  least one of the titles given. Include the correct spelling too. Include dropped
-  letters, missing punctuation, phonetic misspellings, and initialisms — whatever the
-  sellers actually typed.
-- Include a sub-line or sub-brand as a variant ONLY when the parent brand name is absent
-  from those titles and the sub-line is what sellers write instead.
-- Do not invent variants that do not appear in the titles.
-- One entry per distinct brand. Do not repeat.
-- Skip listings with no identifiable brand. Never invent a brand.
-- Do not include "Unbranded", "Handmade", "Vintage" or similar non-brands.
-
-The titles may be footwear, clothing, accessories or anything else. Judge only from what
-is in front of you.`;
-
-const JUDGE_SYSTEM = `You are helping a thrift-store reseller decide what is worth picking up.
-
-For each brand you get real statistics from its SOLD listings — median, lower quartile, top
-decile, and the share of sales clearing $40/$50/$60/$100 — plus its highest-selling titles
-with prices. Trust the statistics; they are already computed. Then answer one question:
-
-  If I found a random item from this brand in a thrift store, is it worth picking up?
-
-  "rare"        Yes, whatever it is. Value holds across the whole brand, not just a few
-                models — a plain example is still worth money.
-  "common"      Only certain ones. The brand alone means nothing, but specific models,
-                lines, materials, eras, countries of make, collaborations or special
-                variants sell well. Say which.
-  "not_worthy"  No. It does not sell for enough to justify picking up, and you cannot
-                identify any specific version that does.
-
-For a "common" brand the real work is saying WHICH items are worth it. Compare the titles
-that sold high against those that sold cheap and name what the expensive ones have in
-common.
-
-Return JSON in this shape:
-{"brands":[{
-  "name":"<brand name exactly as given to you>",
-  "tier":"rare" | "common" | "not_worthy",
-  "models":["<model or line worth buying>", ...],
-  "lookFor":"<one line a person reads in a store>",
-  "reasoning":"<one short sentence>"
-}]}
-
-Rules:
-- "common" requires "models" and "lookFor". Use the short name a reseller would say, not
-  the full listing title. "lookFor" is the one line someone reads while holding the item.
-- Never answer "common" with vague text like "premium models" or "certain styles". If you
-  cannot name a specific model or a specific kind of item, answer "not_worthy".
-- "rare" takes "models": [] and "lookFor": null — the brand alone is the signal.
-- Copy "name" exactly as given. Never rename or merge brands.
-- Judge only from the data in front of you. Do not let a brand's reputation override weak
-  sales, and never carry one brand's models over to another.`;
-
-/**
- * Pass 1 — the brand names present in a batch of titles.
- *
- * Returns [] rather than null on failure so the caller can proceed with whatever other
- * batches succeeded; a partial extraction is still better than none.
- */
-export interface ExtractedBrand {
-  name: string;
-  variants: string[];
-}
-
-async function extractBrandNames(listings: AiListing[]): Promise<ExtractedBrand[]> {
-  const byName = new Map<string, Set<string>>();
-
-  for (let i = 0; i < listings.length; i += EXTRACT_BATCH) {
-    const batch = listings.slice(i, i + EXTRACT_BATCH);
-    const result = await chatJSON<{ brands?: unknown }>({
-      system: EXTRACT_SYSTEM,
-      user: JSON.stringify({ titles: batch.map((l) => l.title) }),
-      maxTokens: 6000,
-    });
-    if (!result) continue;
-
-    const returned = Array.isArray(result.value.brands) ? result.value.brands : [];
-    for (const raw of returned) {
-      const row = (raw ?? {}) as { name?: unknown; variants?: unknown };
-      const name = String(row.name ?? '').replace(/\s+/g, ' ').trim();
-      if (name.length < 2 || name.length > 60) continue;
-
-      const variants = byName.get(name) ?? new Set<string>();
-      // The canonical name is always a variant of itself; the model sometimes omits it.
-      variants.add(normaliseBrand(name));
-      for (const v of Array.isArray(row.variants) ? row.variants : []) {
-        const slug = normaliseBrand(v);
-        // One- and two-character variants match half the corpus by accident.
-        if (slug.length >= 2) variants.add(slug);
-      }
-      byName.set(name, variants);
-    }
-  }
-
-  return [...byName.entries()].map(([name, variants]) => ({ name, variants: [...variants] }));
 }
 
 /**
- * Attribute listings to brand names by word-boundary match.
- *
- * Longest name first so "Polo Ralph Lauren" is never swallowed by "Ralph Lauren". This is
- * the same match the rest of the app uses; it is reliable precisely because the model has
- * already done the hard half by producing the correct name.
+ * Listings per call. The batch is meant to go over whole; this only exists so a scan far
+ * larger than a normal page cannot blow the context window. Well above the ~200 a scan
+ * actually produces.
  */
-export function groupByBrandName(
-  listings: AiListing[],
-  brands: ExtractedBrand[],
-): Map<string, AiListing[]> {
-  // Every variant becomes its own needle pointing back at the canonical name. Longest
-  // first so "polo ralph lauren" beats "ralph lauren", and — the reason this exists —
-  // so "nke" catches the misspelled listings that would otherwise vanish from the
-  // brand's figures and leave only its correctly-spelled, expensive ones behind.
-  const needles = brands
-    .flatMap((brand) =>
-      brand.variants.map((variant) => ({
-        name: brand.name,
-        words: variant.split(' ').filter(Boolean),
-      })),
-    )
-    .filter((entry) => entry.words.length > 0)
-    .sort((a, b) => b.words.length - a.words.length);
+const MAX_PER_CALL = 250;
 
-  const grouped = new Map<string, AiListing[]>();
-  for (const listing of listings) {
-    const words = normaliseBrand(listing.title).split(' ').filter(Boolean);
-    for (const { name, words: needle } of needles) {
-      let hit = false;
-      for (let i = 0; i + needle.length <= words.length && !hit; i += 1) {
-        hit = needle.every((w, k) => words[i + k] === w);
-      }
-      if (hit) {
-        const list = grouped.get(name) ?? [];
-        list.push(listing);
-        grouped.set(name, list);
-        break;
-      }
-    }
-  }
-  return grouped;
+const SYSTEM = `You are analyzing a batch of eBay SOLD listings to determine which brands are worth picking up for resale.
+
+Review ALL listings together. Use the listing titles and sold prices to identify brands, group their sales, determine what is driving their resale value, and classify each brand.
+
+Classify every identifiable brand into exactly one of these categories:
+
+### RARE
+
+The BRAND ITSELF is the pickup signal.
+
+Use Rare when the sold listings show that normal items across the brand consistently have worthwhile resale value. The value should not depend primarily on finding a particular model, line, material, vintage version, collaboration, or special edition.
+
+Ask:
+
+**If I found a random item from this brand at a thrift store, would the brand name alone make it worth picking up or seriously inspecting?**
+
+Do not classify a brand as Rare just because it has several expensive listings. Look at the overall pattern of sales and make sure expensive models are not creating a misleading impression of the brand as a whole.
+
+### COMMON
+
+The MODEL OR VERSION is the pickup signal, not the brand itself.
+
+Use Common when ordinary items from the brand are not consistently worth picking up, but specific models, lines, materials, eras, countries of manufacture, collaborations, or special versions repeatedly sell for worthwhile prices.
+
+For every Common brand, identify exactly what the reseller should look for.
+
+Never give vague advice such as "premium models," "certain styles," or "higher-end versions."
+
+Example:
+
+Nike
+Look for: Jordan, Kobe, SB Dunk, Foamposite, desirable Air Max, ACG, collaborations.
+
+If you cannot identify specific worthwhile models or versions from the sold listings, do NOT classify the brand as Common.
+
+### NOT WORTHY
+
+Use Not Worthy when the brand generally does not have enough resale value AND you cannot identify specific models or versions that consistently make it worth picking up.
+
+A few unusually expensive sales should not prevent a brand from being classified Not Worthy.
+
+### HOW TO JUDGE THE DATA
+
+Use the ENTIRE set of sold listings for each brand.
+
+Pay attention to:
+
+* Typical sold prices
+* Consistency of sold prices
+* Low-priced sales as well as high-priced sales
+* Whether most ordinary examples have worthwhile value
+* Whether high prices are concentrated in particular models
+* Repeated model names among high-value sales
+* Materials, vintage eras, collaborations, country of manufacture, or other identifiable characteristics associated with higher prices
+* Outliers that should not represent the brand as a whole
+
+Do not let brand reputation influence the decision. Judge from the SOLD LISTINGS provided.
+
+Do not assume that an expensive or famous brand is automatically Rare.
+
+### OUTPUT
+
+Return JSON only:
+
+{
+"brands": [
+{
+"name": "Brand Name",
+"tier": "rare",
+"models": [],
+"lookFor": null,
+"reasoning": "Short explanation based on the sold listings."
+},
+{
+"name": "Brand Name",
+"tier": "common",
+"models": ["Model A", "Model B", "Model C"],
+"lookFor": "Model A, Model B, Model C and other specific worthwhile versions identified from the listings.",
+"reasoning": "Ordinary examples sell lower, while these specific models repeatedly command worthwhile prices."
+},
+{
+"name": "Brand Name",
+"tier": "not_worthy",
+"models": [],
+"lookFor": null,
+"reasoning": "Short explanation based on the sold listings."
+}
+]
 }
 
-/** The compact per-brand brief pass 2 reasons over. */
-function brief(name: string, listings: AiListing[], stats: BrandStats) {
-  // Highest first: the models that carry a brand are the ones worth showing, and a
-  // truncated sample of cheap listings would hide exactly what pass 2 is looking for.
-  const sample = [...listings]
-    .sort((a, b) => (b.sold_price ?? 0) - (a.sold_price ?? 0))
-    .slice(0, TITLE_SAMPLE)
-    .map((l) => `$${l.sold_price} ${l.title}`);
+Important:
 
-  return {
-    name,
-    totalSales: listings.length,
-    median: stats.median,
-    lowerQuartile: stats.lowerQuartile,
-    topDecile: stats.topDecile,
-    shareAtLeast: {
-      $40: `${Math.round(stats.shareAt[40] * 100)}%`,
-      $50: `${Math.round(stats.shareAt[50] * 100)}%`,
-      $60: `${Math.round(stats.shareAt[60] * 100)}%`,
-      $100: `${Math.round(stats.shareAt[100] * 100)}%`,
-    },
-    highestSales: sample,
-  };
-}
+**Rare = brand is the reason to pick it up.**
 
-interface JudgedBrand {
+**Common = specific model/version is the reason to pick it up.**
+
+**Not Worthy = neither the brand nor identifiable models provide a strong enough resale signal.**
+
+Analyze patterns across ALL provided sold listings rather than making decisions from a few high-priced examples.`;
+
+interface RawVerdict {
   name?: unknown;
   tier?: unknown;
   models?: unknown;
@@ -242,97 +148,93 @@ interface JudgedBrand {
   reasoning?: unknown;
 }
 
+/** Price first, so the number the judgement turns on leads every line. */
+const asLine = (l: AiListing): string =>
+  `$${l.sold_price ?? '?'} ${String(l.title ?? '').replace(/\s+/g, ' ').trim()}`;
+
 /**
- * Classify every brand found in a batch of listings.
- *
- * Returns null when the model is unavailable — NOT an empty array, because "the AI found
- * no brands" and "there was no AI" must lead to different behaviour in the caller.
+ * Text that only gestures at quality. The prompt forbids it, and the model mostly obeys,
+ * but "premium models" reaching the brand book would read as an endorsement of everything
+ * the brand makes — the exact failure the Common tier exists to prevent.
  */
-export async function classifyListings(listings: AiListing[]): Promise<AiBrandVerdict[] | null> {
-  if (!aiConfigured()) return null;
+function isVague(lookFor: string, models: string[]): boolean {
+  if (lookFor.length < 6) return true;
+  if (models.length > 0) return false;
+  return /^(premium|higher[- ]?end|various|several|certain|specific|good|nice|better|quality)\b/i
+    .test(lookFor);
+}
 
-  const priced = listings.filter((l) => typeof l.sold_price === 'number' && l.sold_price > 0);
-  if (!priced.length) return [];
+/** One call. Returns the brands it could identify, or null if the model was unusable. */
+async function classifyChunk(listings: AiListing[]): Promise<AiBrandVerdict[] | null> {
+  const result = await chatJSON<{ brands?: unknown }>({
+    system: SYSTEM,
+    user: JSON.stringify({ listings: listings.map(asLine) }),
+    /* Measured: 151 listings -> 56 brands -> ~4,400 completion tokens. The headroom is
+       for a denser scan, and costs nothing when unused. */
+    maxTokens: 16000,
+    timeoutMs: 120_000,
+  });
+  if (!result) return null;
 
-  const extracted = await extractBrandNames(priced);
-  if (!extracted.length) return null;
-
-  const grouped = groupByBrandName(priced, extracted);
-
-  // Thin brands are withheld from pass 2 entirely. Asking for a verdict on four sales
-  // invites a confident answer about a sample rather than a brand.
-  const judgeable = [...grouped.entries()].filter(([, ls]) => ls.length >= MIN_FOR_JUDGEMENT);
-  if (!judgeable.length) return [];
-
-  const statsByName = new Map(judgeable.map(([name, ls]) => [
-    name,
-    scoreBrand(ls.map((l) => l.sold_price as number)),
-  ]));
-
-  /* Judged in batches. A single prompt holding three hundred brands would exceed the
-     context and lose the whole scan to one failure; batching also means a brand that
-     confuses the model costs nine neighbours rather than everything. */
-  const returned: JudgedBrand[] = [];
-  let anySucceeded = false;
-
-  for (let i = 0; i < judgeable.length; i += JUDGE_BATCH) {
-    const slice = judgeable.slice(i, i + JUDGE_BATCH);
-    const result = await chatJSON<{ brands?: unknown }>({
-      system: JUDGE_SYSTEM,
-      user: JSON.stringify({
-        brands: slice.map(([name, ls]) => brief(name, ls, statsByName.get(name)!)),
-      }),
-      maxTokens: 4000,
-    });
-    if (!result) continue;
-    anySucceeded = true;
-    if (Array.isArray(result.value.brands)) returned.push(...(result.value.brands as JudgedBrand[]));
-  }
-
-  // Every batch failing is indistinguishable from having no AI, and must fall back
-  // rather than look like "the model found nothing".
-  if (!anySucceeded) return null;
-
+  const rows = Array.isArray(result.value.brands) ? (result.value.brands as RawVerdict[]) : [];
   const verdicts: AiBrandVerdict[] = [];
 
-  for (const row of returned) {
-    const name = String(row?.name ?? '').trim();
-    const listingsForBrand = grouped.get(name);
-    // A name the model invented in pass 2 has no listings behind it and no place in the
-    // book. Silently dropping it is right: it is a hallucination, not a finding.
-    if (!name || !listingsForBrand) continue;
+  for (const row of rows) {
+    const name = String(row?.name ?? '').replace(/\s+/g, ' ').trim();
+    if (name.length < 2 || name.length > 60) continue;
 
-    const tier = String(row?.tier ?? '').toLowerCase();
+    const tier = String(row?.tier ?? '').toLowerCase().replace(/[\s-]/g, '_');
     if (tier !== 'rare' && tier !== 'common' && tier !== 'not_worthy') continue;
 
-    const lookForRaw = row?.lookFor === null || row?.lookFor === undefined ? '' : String(row.lookFor);
-    const lookFor = lookForRaw.replace(/\s+/g, ' ').trim();
-
-    // The rule the rest of the app enforces, applied to the model's output too: a common
-    // brand it could not describe is downgraded rather than stored as a bare famous name.
     const models = (Array.isArray(row?.models) ? row.models : [])
       .map((m) => String(m ?? '').replace(/\s+/g, ' ').trim())
       .filter((m) => m.length >= 2 && m.length <= 60)
       .slice(0, 20);
 
-    // A common brand has to name something. Text that only gestures at quality — with no
-    // model and no describable kind of item behind it — is the failure this downgrade
-    // exists to catch, because it reads as an endorsement of the whole brand.
-    const vague =
-      lookFor.length < 6 ||
-      (models.length === 0 && /^(premium|various|several|certain|specific|good|nice)\b/i.test(lookFor));
-    const finalTier: AiTier = tier === 'common' && vague ? 'not_worthy' : (tier as AiTier);
+    const lookFor = (row?.lookFor === null || row?.lookFor === undefined ? '' : String(row.lookFor))
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    // A common brand nobody can describe is not a common brand.
+    const finalTier: AiTier =
+      tier === 'common' && isVague(lookFor, models) ? 'not_worthy' : (tier as AiTier);
 
     verdicts.push({
       name,
       tier: finalTier,
       models: finalTier === 'common' ? models : [],
       lookFor: finalTier === 'common' ? lookFor : null,
-      reasoning: String(row?.reasoning ?? '').slice(0, 400),
-      stats: statsByName.get(name)!,
-      listingCount: listingsForBrand.length,
+      reasoning: String(row?.reasoning ?? '').replace(/\s+/g, ' ').trim().slice(0, 400),
     });
   }
 
   return verdicts;
+}
+
+/**
+ * Classify every brand in a scan.
+ *
+ * Returns null when the model is unavailable — NOT an empty array, because "no brands
+ * found" and "there was no AI" must lead the caller to different behaviour.
+ */
+export async function classifyListings(listings: AiListing[]): Promise<AiBrandVerdict[] | null> {
+  if (!aiConfigured()) return null;
+
+  const priced = listings.filter(
+    (l) => typeof l.sold_price === 'number' && Number.isFinite(l.sold_price) && l.sold_price > 0,
+  );
+  if (!priced.length) return [];
+
+  if (priced.length <= MAX_PER_CALL) return classifyChunk(priced);
+
+  /* Only for a batch bigger than any single scan produces. Each chunk sees a whole slice
+     rather than a stratum, so a brand's cheap and dear sales stay together. */
+  const chunks: AiListing[][] = [];
+  for (let i = 0; i < priced.length; i += MAX_PER_CALL) {
+    chunks.push(priced.slice(i, i + MAX_PER_CALL));
+  }
+
+  const results = await Promise.all(chunks.map((chunk) => classifyChunk(chunk)));
+  if (results.every((r) => r === null)) return null;
+  return results.flatMap((r) => r ?? []);
 }

@@ -210,17 +210,19 @@ router.post('/import', async (req, res) => {
   let rescored = { applied: 0, skipped: 0 };
 
   if (imported > 0) {
-    const batch = db
-      .prepare(
-        `SELECT title, sold_price FROM ebay_listings
-          WHERE category_id = ? AND sold_price IS NOT NULL
-          ORDER BY id DESC LIMIT 400`,
-      )
-      .all(category.id) as Array<{ title: string; sold_price: number }>;
+    // The batch that just arrived, judged as a whole — a brand's cheap sales are what
+    // separate it from a rare one, so the set has to stay together.
+    const verdicts = await classifyListings(
+      valid.map((l) => ({ title: l.title, sold_price: l.sold_price })),
+    );
 
-    const verdicts = await classifyListings(batch);
-    if (verdicts) aiResult = applyAiVerdicts(verdicts);
-    rescored = applyProposals(analyseBrands());
+    if (verdicts) {
+      aiResult = applyAiVerdicts(verdicts);
+    } else {
+      // Only when there was no AI at all. It cannot create brands — it re-tiers rows that
+      // already exist — so this is a safety net, not a substitute.
+      rescored = applyProposals(analyseBrands());
+    }
   }
 
   res.status(201).json({

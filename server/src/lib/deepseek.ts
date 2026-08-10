@@ -18,7 +18,19 @@
  */
 
 const BASE_URL = process.env.DEEPSEEK_BASE_URL ?? 'https://api.deepseek.com';
-const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-v4-flash';
+/**
+ * A NON-REASONING model on purpose.
+ *
+ * The reasoning variants spend completion tokens thinking before they write, and on a
+ * batch this size they spend ALL of them: measured on 151 listings, deepseek-v4-flash
+ * used its entire 8,000-token budget on reasoning and emitted nothing at all, then the
+ * retry at 24,000 timed out. deepseek-chat answers the same prompt in ~29s using ~4,400
+ * tokens, because every token goes to the answer.
+ *
+ * Classification here is a reading task, not a puzzle — the judgement criteria are spelled
+ * out in the prompt, so there is nothing for extended reasoning to add.
+ */
+const MODEL = process.env.DEEPSEEK_MODEL ?? 'deepseek-chat';
 const API_KEY = process.env.DEEPSEEK_API_KEY ?? '';
 
 export const aiConfigured = (): boolean => Boolean(API_KEY);
