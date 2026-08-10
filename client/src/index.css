@@ -1,25 +1,354 @@
 @import 'tailwindcss';
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Wheelhouse colour system — Flat UI Colors 2, organised as Material Design
+   tokens.
+
+   THREE TIERS, and the rule that makes them worth having:
+
+     1. REFERENCE  --wh-ref-*   The raw palette. Twenty fixed values. NOTHING in
+                                the app may use these directly.
+     2. SYSTEM     --wh-sys-*   Semantic roles (primary, surface, on-surface,
+                                outline, …). These carry theme; they are what
+                                changes between light and dark.
+     3. COMPONENT  @theme +     Tailwind utilities and the component classes
+                   @layer       below, which read system roles and never
+                                reference tier 1.
+
+   Material's actual contribution here is not the naming — it is the ON-COLOUR
+   CONTRACT. Every role that can hold content has a matching `on-` role that is
+   guaranteed to meet WCAG AA against it. Before this file, colour was picked
+   independently at ~480 call sites, so "is this text readable on this box" was
+   answered 480 times, by eye, and sometimes wrongly.
+
+   CONTRAST IS MEASURED, NOT ASSUMED. Every on-/container pair below was solved
+   for numerically and is enforced by tests/contrast.test.ts, which parses this
+   file. If you change a value here and the pair drops under 4.5:1, that test
+   fails. Do not "fix" it by lowering the threshold.
+
+   WHERE THIS DEVIATES FROM THE PALETTE SHEET, AND WHY. The sheet is badged
+   WCAG 2.1 AA but several of its own pairings do not reach it. Measured:
+
+     - Danger #E74C3C carries NO ink at 4.5 (white 3.82, near-black 4.30). The
+       danger FILL is therefore Pomegranate #C0392B (white 5.44). Alizarin is
+       kept as `--wh-ref-alizarin` for bars, icons and borders, where WCAG
+       1.4.11 asks 3:1 and it passes.
+     - Info's darker states break the ink (#2980B9 reaches only 3.82). Info is
+       the one ramp whose hover/pressed LIGHTEN rather than darken. That is the
+       normal direction on a dark UI anyway — Material's own state-layer model
+       lightens on dark surfaces.
+     - Primary and Success pressed tones are lifted a hair (#138D75 → #15977E,
+       #219653 → #229955) for the same reason: 3.98 and 4.34 respectively.
+     - As TEXT on dark surfaces every base hue fails (Info 2.95, Danger 2.43,
+       Accent 1.99). That is what the `-text` roles are for; see below.
+     - The neutral text ramp is lifted so all three tiers clear 4.5 on the
+       LIGHTEST dark surface (elevated #3D566E). The sheet's Tertiary #95A5A6
+       reaches 2.98 there and its Muted #7F8C8D fails on every surface.
+
+   The sheet explicitly sanctions this: "Adjust derived tones slightly if needed
+   to fit your brand while keeping contrast strong."
+   ═══════════════════════════════════════════════════════════════════════════ */
+
 /* Tailwind v4 follows the OS preference by default; Wheelhouse lets the user
    override it, so the dark variant keys off a class on <html> instead. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-@theme {
+/* ─── TIER 1: REFERENCE ────────────────────────────────────────────────────
+   The Flat UI Colors 2 core palette, verbatim. Fixed values, no theme, no
+   meaning. Referenced only by tier 2 below. */
+:root {
+  --wh-ref-turquoise: #1abc9c;
+  --wh-ref-green-sea: #16a085;
+  --wh-ref-emerald: #2ecc71;
+  --wh-ref-nephritis: #27ae60;
+  --wh-ref-peter-river: #3498db;
+  --wh-ref-belize-hole: #2980b9;
+  --wh-ref-amethyst: #9b59b6;
+  --wh-ref-wisteria: #8e44ad;
+  --wh-ref-wet-asphalt: #34495e;
+  --wh-ref-midnight-blue: #2c3e50;
+  --wh-ref-sun-flower: #f1c40f;
+  --wh-ref-orange: #f39c12;
+  --wh-ref-carrot: #e67e22;
+  --wh-ref-pumpkin: #d35400;
+  --wh-ref-alizarin: #e74c3c;
+  --wh-ref-pomegranate: #c0392b;
+  --wh-ref-clouds: #ecf0f1;
+  --wh-ref-silver: #bdc3c7;
+  --wh-ref-concrete: #95a5a6;
+  --wh-ref-asbestos: #7f8c8d;
+
+  /* Derived reference tones. The sheet lists Surfaces & Backgrounds as derived
+     from the core blues, and names three of them; the rest follow the same
+     construction. `ink` is the near-black used as the on-colour for bright
+     fills — Midnight Blue itself only just clears AA on Turquoise (4.56), and
+     a token that scrapes the line is one rounding error from failing. */
+  --wh-ref-ink: #10212e;
+  --wh-ref-elevated: #3d566e;
+  --wh-ref-overlay: #4a657f;
+  --wh-ref-border-strong: #5d6d7e;
+}
+
+/* ─── TIER 2: SYSTEM (light) ───────────────────────────────────────────────
+   The default theme. The sheet specifies dark only, so light is derived from
+   the same core hues: Clouds and white for surfaces, Midnight Blue for ink,
+   and the palette's deeper tones for accents — which is what they are for, as
+   the bright tones cannot carry text on white. */
+:root {
+  --wh-sys-background: #ffffff;
+  --wh-sys-on-background: #373d3e;
+  --wh-sys-surface: #ffffff;
+  --wh-sys-on-surface: #373d3e;
+  --wh-sys-surface-variant: var(--wh-ref-clouds);
+  --wh-sys-on-surface-variant: #576061;
+  --wh-sys-on-surface-muted: #656f70;
+  /* Disabled text is exempt from WCAG 1.4.3 ("inactive user interface
+     components"), which is why this one is allowed below 4.5. */
+  --wh-sys-on-surface-disabled: #97a0a1;
+  --wh-sys-surface-container: var(--wh-ref-clouds);
+  --wh-sys-surface-container-high: #dfe4e5;
+  --wh-sys-inverse-surface: var(--wh-ref-wet-asphalt);
+  --wh-sys-on-inverse-surface: var(--wh-ref-clouds);
+
+  /* `outline` draws the boundary of an INTERACTIVE component — an input, a
+     secondary button — so WCAG 1.4.11 asks 3:1, not the decorative treatment the
+     sheet's Border token implies. Silver #BDC3C7 reaches only 1.78:1 on white,
+     and because a field's fill is the same colour as the page, that border is
+     the only thing identifying it as a field. Asbestos clears it at 3.56:1 and
+     is a core palette value, so nothing is invented here.
+     `outline-variant` stays subtle: it draws dividers and card edges, which are
+     decoration and exempt. */
+  --wh-sys-outline: var(--wh-ref-asbestos);
+  --wh-sys-outline-variant: #dde1e2;
+  /* Scrim dims the page behind a drawer or modal. Always applied at an opacity
+     (bg-scrim/50), never solid — it is a veil, not a surface. */
+  --wh-sys-scrim: #0b1620;
+
+  --wh-sys-primary: #0f7b66;
+  --wh-sys-primary-hover: #0c6a58;
+  --wh-sys-primary-active: #095949;
+  --wh-sys-on-primary: #ffffff;
+  --wh-sys-primary-container: #d3eae3;
+  --wh-sys-on-primary-container: #0c7460;
+  --wh-sys-primary-text: #0f7b66;
+
+  --wh-sys-success: #1a7c44;
+  --wh-sys-success-hover: #166b3a;
+  --wh-sys-success-active: #125a31;
+  --wh-sys-on-success: #ffffff;
+  --wh-sys-success-container: #d0edd7;
+  --wh-sys-on-success-container: #16763f;
+  --wh-sys-success-text: #1a7c44;
+
+  --wh-sys-info: #2471a3;
+  --wh-sys-info-hover: #1f608b;
+  --wh-sys-info-active: #1a5074;
+  --wh-sys-on-info: #ffffff;
+  --wh-sys-info-container: #dbe6f5;
+  --wh-sys-on-info-container: #226b9c;
+  --wh-sys-info-text: #2471a3;
+
+  --wh-sys-warning: #975f08;
+  --wh-sys-warning-hover: #815107;
+  --wh-sys-warning-active: #6b4306;
+  --wh-sys-on-warning: #ffffff;
+  --wh-sys-warning-container: #f8e3ba;
+  --wh-sys-on-warning-container: #7c6404;
+  --wh-sys-warning-text: #975f08;
+
+  --wh-sys-danger: var(--wh-ref-pomegranate);
+  --wh-sys-danger-hover: #a62f23;
+  --wh-sys-danger-active: #922b21;
+  --wh-sys-on-danger: #ffffff;
+  --wh-sys-danger-container: #f9dfde;
+  --wh-sys-on-danger-container: #b73a2d;
+  --wh-sys-danger-text: var(--wh-ref-pomegranate);
+
+  --wh-sys-accent: var(--wh-ref-wisteria);
+  --wh-sys-accent-hover: #7d3c98;
+  --wh-sys-accent-active: #6c3383;
+  --wh-sys-on-accent: #ffffff;
+  --wh-sys-accent-container: #eae3ef;
+  --wh-sys-on-accent-container: #8a4ea2;
+  --wh-sys-accent-text: var(--wh-ref-wisteria);
+
+  /* Elevation, per the sheet's section 07. Light theme keeps the sheet's
+     opacities; dark deepens them, because a shadow at 12% black is invisible
+     against a #2C3E50 page. */
+  --wh-sys-elevation-0: none;
+  --wh-sys-elevation-1: 0 1px 3px rgb(0 0 0 / 0.12);
+  --wh-sys-elevation-2: 0 4px 6px rgb(0 0 0 / 0.16);
+  --wh-sys-elevation-3: 0 10px 20px rgb(0 0 0 / 0.2);
+  --wh-sys-elevation-4: 0 16px 32px rgb(0 0 0 / 0.24);
+}
+
+/* ─── TIER 2: SYSTEM (dark) ────────────────────────────────────────────────
+   The sheet's specification, applied as given except where measurement forced
+   a change — each of those is listed in the header comment above. */
+.dark {
+  --wh-sys-background: var(--wh-ref-midnight-blue);
+  --wh-sys-on-background: #edefef;
+  --wh-sys-surface: var(--wh-ref-wet-asphalt);
+  --wh-sys-on-surface: #edefef;
+  --wh-sys-surface-variant: var(--wh-ref-elevated);
+  --wh-sys-on-surface-variant: #d7dada;
+  --wh-sys-on-surface-muted: #c3c8c8;
+  --wh-sys-on-surface-disabled: #697778;
+  --wh-sys-surface-container: var(--wh-ref-elevated);
+  --wh-sys-surface-container-high: var(--wh-ref-overlay);
+  --wh-sys-inverse-surface: var(--wh-ref-clouds);
+  --wh-sys-on-inverse-surface: var(--wh-ref-midnight-blue);
+
+  /* Same reasoning as light: the sheet's Border #4A657F is 1.53:1 on Wet
+     Asphalt, so an input's edge all but disappears. Concrete reaches 3.33:1. */
+  --wh-sys-outline: var(--wh-ref-concrete);
+  --wh-sys-outline-variant: var(--wh-ref-border-strong);
+  --wh-sys-scrim: #060d13;
+
+  --wh-sys-primary: var(--wh-ref-turquoise);
+  --wh-sys-primary-hover: var(--wh-ref-green-sea);
+  --wh-sys-primary-active: #15977e;
+  --wh-sys-on-primary: var(--wh-ref-ink);
+  --wh-sys-primary-container: #306f6f;
+  --wh-sys-on-primary-container: #cfe9e0;
+  --wh-sys-primary-text: #97d3c1;
+
+  --wh-sys-success: var(--wh-ref-emerald);
+  --wh-sys-success-hover: var(--wh-ref-nephritis);
+  --wh-sys-success-active: #229955;
+  --wh-sys-on-success: var(--wh-ref-ink);
+  --wh-sys-success-container: #337062;
+  --wh-sys-on-success-container: #ccecd4;
+  --wh-sys-success-text: #87d99f;
+
+  /* The one ramp that lightens on hover — see the header. */
+  --wh-sys-info: var(--wh-ref-peter-river);
+  --wh-sys-info-hover: #4ba3e0;
+  --wh-sys-info-active: #62b1e6;
+  --wh-sys-on-info: var(--wh-ref-ink);
+  --wh-sys-info-container: #346a94;
+  --wh-sys-on-info-container: #d9e5f4;
+  --wh-sys-info-text: #aecaea;
+
+  --wh-sys-warning: var(--wh-ref-sun-flower);
+  --wh-sys-warning-hover: var(--wh-ref-orange);
+  --wh-sys-warning-active: #d68910;
+  --wh-sys-on-warning: var(--wh-ref-ink);
+  --wh-sys-warning-container: #706857;
+  --wh-sys-on-warning-container: #f9e7c4;
+  --wh-sys-warning-text: var(--wh-ref-sun-flower);
+
+  --wh-sys-danger: var(--wh-ref-pomegranate);
+  --wh-sys-danger-hover: #a62f23;
+  --wh-sys-danger-active: #922b21;
+  --wh-sys-on-danger: #ffffff;
+  --wh-sys-danger-container: #a24a51;
+  --wh-sys-on-danger-container: #f8dddc;
+  --wh-sys-danger-text: #f2bbb9;
+
+  --wh-sys-accent: var(--wh-ref-amethyst);
+  --wh-sys-accent-hover: var(--wh-ref-wisteria);
+  --wh-sys-accent-active: #7d3c98;
+  --wh-sys-on-accent: #ffffff;
+  --wh-sys-accent-container: #80539c;
+  --wh-sys-on-accent-container: #e9e0ee;
+  --wh-sys-accent-text: #d3c1dd;
+
+  --wh-sys-elevation-1: 0 1px 3px rgb(0 0 0 / 0.36);
+  --wh-sys-elevation-2: 0 4px 6px rgb(0 0 0 / 0.42);
+  --wh-sys-elevation-3: 0 10px 20px rgb(0 0 0 / 0.5);
+  --wh-sys-elevation-4: 0 16px 32px rgb(0 0 0 / 0.58);
+}
+
+/* ─── TIER 3: COMPONENT — Tailwind utilities ───────────────────────────────
+   Each entry points at a system role, so `bg-surface` and `text-on-surface`
+   follow the theme with no `dark:` variant at the call site. That is the whole
+   payoff: a page written in roles is written once, not twice. */
+@theme inline {
   --font-sans:
     'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
     'Helvetica Neue', Arial, sans-serif;
 
-  --color-brand-50: #eef4ff;
-  --color-brand-100: #dae6ff;
-  --color-brand-200: #bdd2ff;
-  --color-brand-300: #90b4ff;
-  --color-brand-400: #5b8cfb;
-  --color-brand-500: #3566f0;
-  --color-brand-600: #1f47dc;
-  --color-brand-700: #1a39b3;
-  --color-brand-800: #1b338f;
-  --color-brand-900: #1c3070;
-  --color-brand-950: #141f45;
+  --color-background: var(--wh-sys-background);
+  --color-on-background: var(--wh-sys-on-background);
+  --color-surface: var(--wh-sys-surface);
+  --color-on-surface: var(--wh-sys-on-surface);
+  --color-surface-variant: var(--wh-sys-surface-variant);
+  --color-on-surface-variant: var(--wh-sys-on-surface-variant);
+  --color-on-surface-muted: var(--wh-sys-on-surface-muted);
+  --color-on-surface-disabled: var(--wh-sys-on-surface-disabled);
+  --color-surface-container: var(--wh-sys-surface-container);
+  --color-surface-container-high: var(--wh-sys-surface-container-high);
+  --color-inverse-surface: var(--wh-sys-inverse-surface);
+  --color-on-inverse-surface: var(--wh-sys-on-inverse-surface);
+
+  --color-outline: var(--wh-sys-outline);
+  --color-outline-variant: var(--wh-sys-outline-variant);
+  --color-scrim: var(--wh-sys-scrim);
+
+  --color-primary: var(--wh-sys-primary);
+  --color-primary-hover: var(--wh-sys-primary-hover);
+  --color-primary-active: var(--wh-sys-primary-active);
+  --color-on-primary: var(--wh-sys-on-primary);
+  --color-primary-container: var(--wh-sys-primary-container);
+  --color-on-primary-container: var(--wh-sys-on-primary-container);
+  --color-primary-text: var(--wh-sys-primary-text);
+
+  --color-success: var(--wh-sys-success);
+  --color-success-hover: var(--wh-sys-success-hover);
+  --color-success-active: var(--wh-sys-success-active);
+  --color-on-success: var(--wh-sys-on-success);
+  --color-success-container: var(--wh-sys-success-container);
+  --color-on-success-container: var(--wh-sys-on-success-container);
+  --color-success-text: var(--wh-sys-success-text);
+
+  --color-info: var(--wh-sys-info);
+  --color-info-hover: var(--wh-sys-info-hover);
+  --color-info-active: var(--wh-sys-info-active);
+  --color-on-info: var(--wh-sys-on-info);
+  --color-info-container: var(--wh-sys-info-container);
+  --color-on-info-container: var(--wh-sys-on-info-container);
+  --color-info-text: var(--wh-sys-info-text);
+
+  --color-warning: var(--wh-sys-warning);
+  --color-warning-hover: var(--wh-sys-warning-hover);
+  --color-warning-active: var(--wh-sys-warning-active);
+  --color-on-warning: var(--wh-sys-on-warning);
+  --color-warning-container: var(--wh-sys-warning-container);
+  --color-on-warning-container: var(--wh-sys-on-warning-container);
+  --color-warning-text: var(--wh-sys-warning-text);
+
+  --color-danger: var(--wh-sys-danger);
+  --color-danger-hover: var(--wh-sys-danger-hover);
+  --color-danger-active: var(--wh-sys-danger-active);
+  --color-on-danger: var(--wh-sys-on-danger);
+  --color-danger-container: var(--wh-sys-danger-container);
+  --color-on-danger-container: var(--wh-sys-on-danger-container);
+  --color-danger-text: var(--wh-sys-danger-text);
+
+  --color-accent: var(--wh-sys-accent);
+  --color-accent-hover: var(--wh-sys-accent-hover);
+  --color-accent-active: var(--wh-sys-accent-active);
+  --color-on-accent: var(--wh-sys-on-accent);
+  --color-accent-container: var(--wh-sys-accent-container);
+  --color-on-accent-container: var(--wh-sys-on-accent-container);
+  --color-accent-text: var(--wh-sys-accent-text);
+
+  /* Categorical series for charts and grouping — section 05 of the sheet.
+     Ordered so neighbours stay distinguishable. */
+  --color-chart-1: var(--wh-ref-turquoise);
+  --color-chart-2: var(--wh-ref-emerald);
+  --color-chart-3: var(--wh-ref-peter-river);
+  --color-chart-4: var(--wh-ref-amethyst);
+  --color-chart-5: var(--wh-ref-sun-flower);
+  --color-chart-6: var(--wh-ref-carrot);
+  --color-chart-7: var(--wh-ref-alizarin);
+  --color-chart-8: var(--wh-ref-concrete);
+
+  --shadow-e1: var(--wh-sys-elevation-1);
+  --shadow-e2: var(--wh-sys-elevation-2);
+  --shadow-e3: var(--wh-sys-elevation-3);
+  --shadow-e4: var(--wh-sys-elevation-4);
 }
 
 @layer base {
@@ -28,12 +357,12 @@
   }
 
   body {
-    @apply bg-slate-50 font-sans text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    @apply bg-background font-sans text-on-background antialiased;
   }
 
   /* A consistent, clearly visible focus ring for keyboard users. */
   :focus-visible {
-    @apply outline-2 outline-offset-2 outline-brand-600 dark:outline-brand-400;
+    @apply outline-2 outline-offset-2 outline-primary;
   }
 
   [hidden] {
@@ -43,27 +372,41 @@
 
 @layer components {
   .card {
-    @apply rounded-lg border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900;
+    @apply rounded-lg border border-outline-variant bg-surface text-on-surface shadow-e1;
   }
 
   .btn {
     @apply inline-flex cursor-pointer items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium whitespace-nowrap transition-colors select-none disabled:pointer-events-none disabled:opacity-50;
   }
 
+  /* Filled variants. Each pairs a role with its own on-colour — that pairing is
+     the contract, so never split one across two classes. */
   .btn-primary {
-    @apply bg-brand-600 text-white hover:bg-brand-700 active:bg-brand-800;
-  }
-
-  .btn-secondary {
-    @apply border border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800;
-  }
-
-  .btn-ghost {
-    @apply text-slate-600 hover:bg-slate-200/70 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100;
+    @apply bg-primary text-on-primary hover:bg-primary-hover active:bg-primary-active;
   }
 
   .btn-danger {
-    @apply bg-red-600 text-white hover:bg-red-700 active:bg-red-800;
+    @apply bg-danger text-on-danger hover:bg-danger-hover active:bg-danger-active;
+  }
+
+  .btn-success {
+    @apply bg-success text-on-success hover:bg-success-hover active:bg-success-active;
+  }
+
+  .btn-info {
+    @apply bg-info text-on-info hover:bg-info-hover active:bg-info-active;
+  }
+
+  .btn-warning {
+    @apply bg-warning text-on-warning hover:bg-warning-hover active:bg-warning-active;
+  }
+
+  .btn-secondary {
+    @apply border border-outline bg-surface text-on-surface hover:bg-surface-container;
+  }
+
+  .btn-ghost {
+    @apply text-on-surface-variant hover:bg-surface-container hover:text-on-surface;
   }
 
   .btn-sm {
@@ -75,13 +418,13 @@
   }
 
   .label {
-    @apply mb-1.5 block text-sm font-medium text-slate-700 dark:text-slate-300;
+    @apply mb-1.5 block text-sm font-medium text-on-surface-variant;
   }
 
   .input,
   .select,
   .textarea {
-    @apply block w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 transition-colors placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:placeholder:text-slate-500 dark:focus:border-brand-400;
+    @apply block w-full rounded-md border border-outline bg-surface px-3 py-2 text-sm text-on-surface transition-colors placeholder:text-on-surface-muted focus:border-primary focus:ring-2 focus:ring-primary/30 focus:outline-none disabled:opacity-60;
   }
 
   .textarea {
@@ -89,27 +432,57 @@
   }
 
   .input-invalid {
-    @apply border-red-500 focus:border-red-500 focus:ring-red-500/30 dark:border-red-500;
+    @apply border-danger focus:border-danger focus:ring-danger/30;
   }
 
   .badge {
     @apply inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium ring-1 ring-inset;
   }
 
+  /* Tonal badges. The container/on-container pair is what makes a tinted chip
+     legible in both themes without a `dark:` at the call site. */
+  .badge-neutral {
+    @apply bg-surface-container text-on-surface-variant ring-outline;
+  }
+
+  .badge-primary {
+    @apply bg-primary-container text-on-primary-container ring-primary/30;
+  }
+
+  .badge-success {
+    @apply bg-success-container text-on-success-container ring-success/30;
+  }
+
+  .badge-info {
+    @apply bg-info-container text-on-info-container ring-info/30;
+  }
+
+  .badge-warning {
+    @apply bg-warning-container text-on-warning-container ring-warning/30;
+  }
+
+  .badge-danger {
+    @apply bg-danger-container text-on-danger-container ring-danger/30;
+  }
+
+  .badge-accent {
+    @apply bg-accent-container text-on-accent-container ring-accent/30;
+  }
+
   .field-error {
-    @apply mt-1.5 text-xs font-medium text-red-600 dark:text-red-400;
+    @apply mt-1.5 text-xs font-medium text-danger-text;
   }
 
   .th {
-    @apply px-4 py-3 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400;
+    @apply px-4 py-3 text-left text-xs font-semibold tracking-wide text-on-surface-muted uppercase;
   }
 
   .td {
-    @apply px-4 py-3 text-sm text-slate-700 align-top dark:text-slate-300;
+    @apply px-4 py-3 text-sm text-on-surface-variant align-top;
   }
 
   .link {
-    @apply text-brand-700 underline-offset-2 hover:underline dark:text-brand-300;
+    @apply text-primary-text underline-offset-2 hover:underline;
   }
 }
 

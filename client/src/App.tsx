@@ -15,10 +15,10 @@ import { SettingsPage } from './pages/SettingsPage';
 function NotFoundPage() {
   return (
     <div className="card flex flex-col items-center px-6 py-16 text-center">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+      <h2 className="text-lg font-semibold text-on-surface">
         Page not found
       </h2>
-      <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
+      <p className="mt-1.5 text-sm text-on-surface-variant">
         That page is not part of Wheelhouse.
       </p>
       <Link to="/" className="btn btn-primary mt-5">

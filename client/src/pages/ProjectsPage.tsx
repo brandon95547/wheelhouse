@@ -105,7 +105,7 @@ export function ProjectsPage() {
         actions={
           <>
             <div
-              className="inline-flex rounded-md border border-slate-300 p-0.5 dark:border-slate-700"
+              className="inline-flex rounded-md border border-outline p-0.5"
               role="group"
               aria-label="Change project view"
             >
@@ -122,8 +122,8 @@ export function ProjectsPage() {
                   aria-pressed={view === key}
                   className={`btn btn-sm ${
                     view === key
-                      ? 'bg-slate-200 text-slate-900 dark:bg-slate-700 dark:text-slate-100'
-                      : 'text-slate-600 dark:text-slate-400'
+                      ? 'bg-surface-container-high text-on-surface'
+                      : 'text-on-surface-variant'
                   }`}
                 >
                   <Icon className="size-3.5" aria-hidden="true" />
@@ -162,7 +162,7 @@ export function ProjectsPage() {
             <TableScroll>
               <table className="w-full border-collapse">
                 <caption className="sr-only">Projects</caption>
-                <thead className="border-b border-slate-200 dark:border-slate-800">
+                <thead className="border-b border-outline-variant">
                   <tr>
                     <th scope="col" className="th">Project</th>
                     <th scope="col" className="th">Client</th>
@@ -172,15 +172,15 @@ export function ProjectsPage() {
                     <th scope="col" className="th text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                <tbody className="divide-y divide-outline-variant">
                   {crud.rows.map((project) => (
-                    <tr key={project.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                    <tr key={project.id} className="hover:bg-surface-container">
                       <td className="td">
-                        <p className="font-medium text-slate-900 dark:text-slate-100">
+                        <p className="font-medium text-on-surface">
                           {project.name}
                         </p>
                         {project.notes ? (
-                          <p className="mt-1 line-clamp-2 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+                          <p className="mt-1 line-clamp-2 max-w-sm text-xs text-on-surface-muted">
                             {project.notes}
                           </p>
                         ) : null}
@@ -196,7 +196,7 @@ export function ProjectsPage() {
                             isOverdue(project.due_date) &&
                             project.status !== 'Completed' &&
                             project.status !== 'Cancelled'
-                              ? 'font-medium text-amber-700 dark:text-amber-400'
+                              ? 'font-medium text-warning-text'
                               : ''
                           }
                         >
@@ -215,7 +215,7 @@ export function ProjectsPage() {
                           </button>
                           <button
                             type="button"
-                            className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                            className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                             onClick={() => crud.requestDelete(project)}
                             aria-label={`Delete ${project.name}`}
                           >
@@ -234,22 +234,22 @@ export function ProjectsPage() {
                 const items = crud.rows.filter((p) => p.status === columnStatus);
                 return (
                   <section key={columnStatus} className="flex flex-col gap-2">
-                    <h2 className="flex items-center justify-between text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                    <h2 className="flex items-center justify-between text-xs font-semibold tracking-wide text-on-surface-muted uppercase">
                       {columnStatus}
                       <span className="tabular-nums">{items.length}</span>
                     </h2>
                     {items.length === 0 ? (
-                      <p className="rounded-md border border-dashed border-slate-300 px-3 py-6 text-center text-xs text-slate-400 dark:border-slate-700">
+                      <p className="rounded-md border border-dashed border-outline px-3 py-6 text-center text-xs text-on-surface-muted">
                         None
                       </p>
                     ) : (
                       items.map((project) => (
                         <article
                           key={project.id}
-                          className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950"
+                          className="rounded-md border border-outline-variant bg-background p-3"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                            <p className="text-sm font-medium text-on-surface">
                               {project.name}
                             </p>
                             <button
@@ -262,12 +262,12 @@ export function ProjectsPage() {
                             </button>
                           </div>
                           {project.contact_name ? (
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            <p className="mt-1 text-xs text-on-surface-muted">
                               {project.contact_name}
                             </p>
                           ) : null}
                           {project.due_date ? (
-                            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                            <p className="mt-2 text-xs text-on-surface-muted">
                               Due {formatDate(project.due_date)}
                             </p>
                           ) : null}

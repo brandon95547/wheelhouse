@@ -23,17 +23,17 @@ let nextId = 1;
 const STYLES: Record<ToastKind, { wrapper: string; icon: typeof Info }> = {
   success: {
     wrapper:
-      'border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-100',
+      'border-success/40 bg-success-container text-on-success-container',
     icon: CheckCircle2,
   },
   error: {
     wrapper:
-      'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950 dark:text-red-100',
+      'border-danger/40 bg-danger-container text-on-danger-container',
     icon: AlertCircle,
   },
   info: {
     wrapper:
-      'border-slate-300 bg-white text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100',
+      'border-outline bg-surface text-on-surface',
     icon: Info,
   },
 };

@@ -59,10 +59,10 @@ function ContactDetail({ contact, onClose }: { contact: Contact; onClose: () => 
             ['Next follow-up', formatDate(contact.next_follow_up_date), null],
           ].map(([label, value, href]) => (
             <div key={label as string}>
-              <dt className="text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
+              <dt className="text-xs font-medium tracking-wide text-on-surface-muted uppercase">
                 {label}
               </dt>
-              <dd className="mt-1 text-sm text-slate-800 dark:text-slate-200">
+              <dd className="mt-1 text-sm text-on-surface">
                 {value ? (
                   href ? (
                     <a className="link" href={href as string} target="_blank" rel="noreferrer noopener">
@@ -80,36 +80,36 @@ function ContactDetail({ contact, onClose }: { contact: Contact; onClose: () => 
         </dl>
 
         <div>
-          <h3 className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
+          <h3 className="mb-2 text-xs font-medium tracking-wide text-on-surface-muted uppercase">
             Notes
           </h3>
-          <p className="text-sm whitespace-pre-wrap text-slate-800 dark:text-slate-200">
+          <p className="text-sm whitespace-pre-wrap text-on-surface">
             {contact.notes || 'No notes for this contact yet.'}
           </p>
         </div>
 
         <div>
-          <h3 className="mb-2 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
+          <h3 className="mb-2 text-xs font-medium tracking-wide text-on-surface-muted uppercase">
             Projects
           </h3>
           {error ? (
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+            <p className="text-sm text-danger-text">{error}</p>
           ) : projects === null ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">Loading…</p>
+            <p className="text-sm text-on-surface-muted">Loading…</p>
           ) : projects.length === 0 ? (
-            <p className="text-sm text-slate-500 dark:text-slate-400">
+            <p className="text-sm text-on-surface-muted">
               No projects are assigned to this contact yet.
             </p>
           ) : (
-            <ul className="divide-y divide-slate-200 rounded-md border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+            <ul className="divide-y divide-outline-variant rounded-md border border-outline-variant">
               {projects.map((project) => (
                 <li key={project.id} className="flex items-center justify-between gap-3 px-3 py-2">
-                  <span className="truncate text-sm text-slate-800 dark:text-slate-200">
+                  <span className="truncate text-sm text-on-surface">
                     {project.name}
                   </span>
                   <span className="flex shrink-0 items-center gap-2">
                     {project.due_date ? (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-on-surface-muted">
                         Due {formatDate(project.due_date)}
                       </span>
                     ) : null}
@@ -121,7 +121,7 @@ function ContactDetail({ contact, onClose }: { contact: Contact; onClose: () => 
           )}
         </div>
       </div>
-      <div className="flex justify-end border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+      <div className="flex justify-end border-t border-outline-variant px-5 py-4">
         <button type="button" className="btn btn-secondary" onClick={onClose}>
           Close
         </button>
@@ -253,7 +253,7 @@ export function CrmPage() {
           <TableScroll>
             <table className="w-full border-collapse">
               <caption className="sr-only">CRM contacts</caption>
-              <thead className="border-b border-slate-200 dark:border-slate-800">
+              <thead className="border-b border-outline-variant">
                 <tr>
                   <th scope="col" className="th">Contact</th>
                   <th scope="col" className="th">Details</th>
@@ -264,15 +264,15 @@ export function CrmPage() {
                   <th scope="col" className="th text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              <tbody className="divide-y divide-outline-variant">
                 {crud.rows.map((contact) => (
-                  <tr key={contact.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr key={contact.id} className="hover:bg-surface-container">
                     <td className="td">
-                      <p className="font-medium text-slate-900 dark:text-slate-100">
+                      <p className="font-medium text-on-surface">
                         {contact.name}
                       </p>
                       {contact.business ? (
-                        <p className="flex items-center gap-1 text-xs text-slate-500 dark:text-slate-400">
+                        <p className="flex items-center gap-1 text-xs text-on-surface-muted">
                           <Building2 className="size-3" aria-hidden="true" />
                           {contact.business}
                         </p>
@@ -291,7 +291,7 @@ export function CrmPage() {
                           </a>
                         ) : null}
                         {!contact.email && !contact.phone ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-on-surface-muted">—</span>
                         ) : null}
                       </div>
                     </td>
@@ -309,8 +309,8 @@ export function CrmPage() {
                           <span
                             className={`text-xs ${
                               isOverdue(contact.next_follow_up_date)
-                                ? 'font-medium text-amber-700 dark:text-amber-400'
-                                : 'text-slate-500 dark:text-slate-400'
+                                ? 'font-medium text-warning-text'
+                                : 'text-on-surface-muted'
                             }`}
                           >
                             {relativeDay(contact.next_follow_up_date)}
@@ -340,7 +340,7 @@ export function CrmPage() {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                          className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                           onClick={() => crud.requestDelete(contact)}
                           aria-label={`Delete ${contact.name}`}
                         >

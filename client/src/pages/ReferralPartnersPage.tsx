@@ -137,7 +137,7 @@ export function ReferralPartnersPage() {
           <TableScroll>
             <table className="w-full border-collapse">
               <caption className="sr-only">Referral partners</caption>
-              <thead className="border-b border-slate-200 dark:border-slate-800">
+              <thead className="border-b border-outline-variant">
                 <tr>
                   <th scope="col" className="th">Partner</th>
                   <th scope="col" className="th">Industry</th>
@@ -147,20 +147,20 @@ export function ReferralPartnersPage() {
                   <th scope="col" className="th text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              <tbody className="divide-y divide-outline-variant">
                 {crud.rows.map((partner) => (
-                  <tr key={partner.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr key={partner.id} className="hover:bg-surface-container">
                     <td className="td">
-                      <p className="font-medium text-slate-900 dark:text-slate-100">
+                      <p className="font-medium text-on-surface">
                         {partner.name}
                       </p>
                       {partner.company ? (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                        <p className="text-xs text-on-surface-muted">
                           {partner.company}
                         </p>
                       ) : null}
                       {partner.notes ? (
-                        <p className="mt-1 line-clamp-2 max-w-xs text-xs text-slate-500 dark:text-slate-400">
+                        <p className="mt-1 line-clamp-2 max-w-xs text-xs text-on-surface-muted">
                           {partner.notes}
                         </p>
                       ) : null}
@@ -189,7 +189,7 @@ export function ReferralPartnersPage() {
                           </a>
                         ) : null}
                         {!partner.email && !partner.phone && !partner.website ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-on-surface-muted">—</span>
                         ) : null}
                       </div>
                     </td>
@@ -219,7 +219,7 @@ export function ReferralPartnersPage() {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                          className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                           onClick={() => crud.requestDelete(partner)}
                           aria-label={`Delete ${partner.name}`}
                         >

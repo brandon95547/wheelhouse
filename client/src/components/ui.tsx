@@ -3,45 +3,51 @@ import { AlertTriangle, Loader2, RotateCw, Search, X } from 'lucide-react';
 
 /* ------------------------------------------------------------------ badges */
 
-const TONES: Record<string, string> = {
-  slate:
-    'bg-slate-100 text-slate-700 ring-slate-500/20 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-400/20',
-  blue: 'bg-blue-50 text-blue-700 ring-blue-600/20 dark:bg-blue-950 dark:text-blue-300 dark:ring-blue-400/25',
-  emerald:
-    'bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-950 dark:text-emerald-300 dark:ring-emerald-400/25',
-  amber:
-    'bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-950 dark:text-amber-300 dark:ring-amber-400/25',
-  violet:
-    'bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-950 dark:text-violet-300 dark:ring-violet-400/25',
-  rose: 'bg-rose-50 text-rose-700 ring-rose-600/20 dark:bg-rose-950 dark:text-rose-300 dark:ring-rose-400/25',
-};
+/* Tones are named for what they MEAN, not for the hue they happen to be.
+
+   A map keyed `blue`/`rose` pins the palette in place: re-theming then means
+   editing every status that mentions a colour, and "Lost is rose" stops being
+   true the moment rose is not the danger colour. Keyed `info`/`danger`, the map
+   outlives any palette — and each entry resolves to one of the `.badge-*`
+   classes, so the container/on-container pairing (the part that has to stay
+   legible in both themes) lives in one place instead of six. */
+const TONES = {
+  neutral: 'badge-neutral',
+  info: 'badge-info',
+  success: 'badge-success',
+  warning: 'badge-warning',
+  accent: 'badge-accent',
+  danger: 'badge-danger',
+} as const;
+
+export type BadgeTone = keyof typeof TONES;
 
 /** Keeps status colours consistent everywhere a status is shown. */
-const STATUS_TONES: Record<string, keyof typeof TONES> = {
+const STATUS_TONES: Record<string, BadgeTone> = {
   // Leads
-  New: 'blue',
-  Contacted: 'slate',
-  'Follow-up': 'amber',
-  Qualified: 'violet',
-  Won: 'emerald',
-  Lost: 'rose',
+  New: 'info',
+  Contacted: 'neutral',
+  'Follow-up': 'warning',
+  Qualified: 'accent',
+  Won: 'success',
+  Lost: 'danger',
   // Contacts
-  Prospect: 'blue',
-  Client: 'emerald',
-  Partner: 'violet',
-  Active: 'emerald',
-  Inactive: 'slate',
-  Archived: 'slate',
+  Prospect: 'info',
+  Client: 'success',
+  Partner: 'accent',
+  Active: 'success',
+  Inactive: 'neutral',
+  Archived: 'neutral',
   // Projects
-  Planned: 'slate',
-  Waiting: 'amber',
-  Completed: 'blue',
-  Cancelled: 'rose',
+  Planned: 'neutral',
+  Waiting: 'warning',
+  Completed: 'info',
+  Cancelled: 'danger',
   // Events
-  Meeting: 'blue',
-  'Networking event': 'violet',
-  'Project deadline': 'rose',
-  Reminder: 'slate',
+  Meeting: 'info',
+  'Networking event': 'accent',
+  'Project deadline': 'danger',
+  Reminder: 'neutral',
 };
 
 export function Badge({
@@ -49,9 +55,9 @@ export function Badge({
   tone,
 }: {
   children: ReactNode;
-  tone?: keyof typeof TONES;
+  tone?: BadgeTone;
 }) {
-  const key = tone ?? STATUS_TONES[String(children)] ?? 'slate';
+  const key = tone ?? STATUS_TONES[String(children)] ?? 'neutral';
   return <span className={`badge ${TONES[key]}`}>{children}</span>;
 }
 
@@ -66,7 +72,7 @@ export function PageHeader({
 }) {
   return (
     <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <p className="max-w-2xl text-sm text-slate-600 dark:text-slate-400">
+      <p className="max-w-2xl text-sm text-on-surface-variant">
         {description}
       </p>
       {actions ? <div className="flex shrink-0 flex-wrap gap-2">{actions}</div> : null}
@@ -79,7 +85,7 @@ export function PageHeader({
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
     <div
-      className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-slate-500 dark:text-slate-400"
+      className="flex items-center justify-center gap-3 px-6 py-16 text-sm text-on-surface-muted"
       role="status"
     >
       <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -97,8 +103,8 @@ export function ErrorState({
 }) {
   return (
     <div className="flex flex-col items-center gap-3 px-6 py-16 text-center" role="alert">
-      <AlertTriangle className="size-6 text-red-600 dark:text-red-400" aria-hidden="true" />
-      <p className="max-w-md text-sm text-slate-700 dark:text-slate-300">{message}</p>
+      <AlertTriangle className="size-6 text-danger-text" aria-hidden="true" />
+      <p className="max-w-md text-sm text-on-surface-variant">{message}</p>
       {onRetry ? (
         <button type="button" className="btn btn-secondary" onClick={onRetry}>
           <RotateCw className="size-4" aria-hidden="true" />
@@ -122,13 +128,13 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center px-6 py-16 text-center">
-      <div className="mb-4 rounded-full bg-slate-100 p-3 dark:bg-slate-800">
-        <Icon className="size-6 text-slate-500 dark:text-slate-400" aria-hidden="true" />
+      <div className="mb-4 rounded-full bg-surface-container p-3">
+        <Icon className="size-6 text-on-surface-muted" aria-hidden="true" />
       </div>
-      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+      <h3 className="text-base font-semibold text-on-surface">
         {title}
       </h3>
-      <p className="mt-1.5 max-w-md text-sm text-slate-600 dark:text-slate-400">
+      <p className="mt-1.5 max-w-md text-sm text-on-surface-variant">
         {description}
       </p>
       {action ? <div className="mt-5">{action}</div> : null}
@@ -152,7 +158,7 @@ export function SearchInput({
   return (
     <div className="relative w-full sm:max-w-xs">
       <Search
-        className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-slate-400"
+        className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-on-surface-muted"
         aria-hidden="true"
       />
       <input
@@ -167,7 +173,7 @@ export function SearchInput({
         <button
           type="button"
           onClick={() => onChange('')}
-          className="absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer rounded p-1 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+          className="absolute top-1/2 right-2 -translate-y-1/2 cursor-pointer rounded p-1 text-on-surface-muted hover:text-on-surface-variant"
           aria-label="Clear search"
         >
           <X className="size-3.5" aria-hidden="true" />
@@ -210,7 +216,7 @@ export function FilterSelect({
 /** Search + filters row that sits above a table. */
 export function Toolbar({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 border-b border-slate-200 p-4 sm:flex-row sm:flex-wrap sm:items-center dark:border-slate-800">
+    <div className="flex flex-col gap-3 border-b border-outline-variant p-4 sm:flex-row sm:flex-wrap sm:items-center">
       {children}
     </div>
   );
@@ -224,7 +230,7 @@ export function TableScroll({ children }: { children: ReactNode }) {
 
 export function ResultCount({ count, noun }: { count: number; noun: string }) {
   return (
-    <p className="text-xs text-slate-500 sm:ml-auto dark:text-slate-400" aria-live="polite">
+    <p className="text-xs text-on-surface-muted sm:ml-auto" aria-live="polite">
       {count} {count === 1 ? noun : `${noun}s`}
     </p>
   );
@@ -245,15 +251,15 @@ export function StatCard({
 }) {
   return (
     <div className="card p-4">
-      <div className="flex items-center gap-2 text-slate-500 dark:text-slate-400">
+      <div className="flex items-center gap-2 text-on-surface-muted">
         <Icon className="size-4" aria-hidden="true" />
         <span className="text-sm font-medium">{label}</span>
       </div>
-      <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-slate-900 dark:text-slate-50">
+      <p className="mt-2 text-3xl font-semibold tracking-tight tabular-nums text-on-surface">
         {value}
       </p>
       {hint ? (
-        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p>
+        <p className="mt-1 text-xs text-on-surface-muted">{hint}</p>
       ) : null}
     </div>
   );

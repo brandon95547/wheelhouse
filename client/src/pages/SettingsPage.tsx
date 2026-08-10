@@ -32,9 +32,9 @@ function Section({
 }) {
   return (
     <section className="card">
-      <header className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">{title}</h2>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{description}</p>
+      <header className="border-b border-outline-variant px-5 py-4">
+        <h2 className="text-sm font-semibold text-on-surface">{title}</h2>
+        <p className="mt-1 text-sm text-on-surface-variant">{description}</p>
       </header>
       <div className="px-5 py-4">{children}</div>
     </section>
@@ -166,10 +166,10 @@ export function SettingsPage() {
             </div>
           </div>
 
-          <div className="mt-4 flex items-start gap-2 rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+          <div className="mt-4 flex items-start gap-2 rounded-md border border-outline-variant bg-background p-3 text-sm text-on-surface-variant">
             <Puzzle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
             <div>
-              <p className="font-medium text-slate-800 dark:text-slate-200">
+              <p className="font-medium text-on-surface">
                 Loading the extension
               </p>
               <ol className="mt-1.5 list-decimal space-y-1 pl-4">
@@ -190,7 +190,7 @@ export function SettingsPage() {
           description="Where Wheelhouse is running and what it is storing."
         >
           {info.error ? (
-            <p className="text-sm text-red-600 dark:text-red-400">{info.error}</p>
+            <p className="text-sm text-danger-text">{info.error}</p>
           ) : (
             <dl className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               {[
@@ -204,13 +204,13 @@ export function SettingsPage() {
                 ],
               ].map(([label, value]) => (
                 <div key={label}>
-                  <dt className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                  <dt className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-on-surface-muted uppercase">
                     {label === 'Database' ? (
                       <Database className="size-3" aria-hidden="true" />
                     ) : null}
                     {label}
                   </dt>
-                  <dd className="mt-1 text-sm break-all text-slate-800 dark:text-slate-200">
+                  <dd className="mt-1 text-sm break-all text-on-surface">
                     {value}
                   </dd>
                 </div>

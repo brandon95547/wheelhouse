@@ -44,8 +44,8 @@ function SidebarLink({
           'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
           collapsed ? 'justify-center px-2' : '',
           isActive
-            ? 'bg-brand-50 text-brand-700 dark:bg-brand-950 dark:text-brand-200'
-            : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100',
+            ? 'bg-primary-container text-primary-text'
+            : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
         ].join(' ')
       }
     >
@@ -99,18 +99,18 @@ export function AppLayout() {
   const sidebarBody = (
     <>
       <div
-        className={`flex h-16 items-center gap-2.5 border-b border-slate-200 px-4 dark:border-slate-800 ${
+        className={`flex h-16 items-center gap-2.5 border-b border-outline-variant px-4 ${
           collapsed ? 'lg:justify-center lg:px-2' : ''
         }`}
       >
-        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-brand-600 text-white">
+        <span className="grid size-9 shrink-0 place-items-center rounded-md bg-primary text-on-primary">
           <ShipWheel className="size-5" aria-hidden="true" />
         </span>
         <span className={collapsed ? 'lg:sr-only' : ''}>
-          <span className="block text-sm font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+          <span className="block text-sm font-semibold tracking-tight text-on-surface">
             Wheelhouse
           </span>
-          <span className="block text-xs text-slate-500 dark:text-slate-400">
+          <span className="block text-xs text-on-surface-muted">
             Your business command center.
           </span>
         </span>
@@ -133,7 +133,7 @@ export function AppLayout() {
             onNavigate={() => setMobileOpen(false)}
           />
         ))}
-        <div className="mt-auto border-t border-slate-200 pt-3 dark:border-slate-800">
+        <div className="mt-auto border-t border-outline-variant pt-3">
           <SidebarLink
             item={SETTINGS_NAV}
             collapsed={collapsed}
@@ -152,13 +152,13 @@ export function AppLayout() {
         aria-hidden={!mobileOpen}
       >
         <div
-          className={`absolute inset-0 bg-slate-900/50 transition-opacity ${
+          className={`absolute inset-0 bg-scrim/50 transition-opacity ${
             mobileOpen ? 'opacity-100' : 'opacity-0'
           }`}
           onClick={() => setMobileOpen(false)}
         />
         <aside
-          className={`absolute inset-y-0 left-0 flex w-72 flex-col border-r border-slate-200 bg-white transition-transform dark:border-slate-800 dark:bg-slate-900 ${
+          className={`absolute inset-y-0 left-0 flex w-72 flex-col border-r border-outline-variant bg-surface transition-transform ${
             mobileOpen ? 'translate-x-0' : '-translate-x-full'
           }`}
         >
@@ -168,7 +168,7 @@ export function AppLayout() {
 
       {/* Desktop sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-slate-200 bg-white lg:flex dark:border-slate-800 dark:bg-slate-900 ${
+        className={`fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-outline-variant bg-surface lg:flex ${
           collapsed ? 'w-16' : 'w-64'
         }`}
       >
@@ -176,7 +176,7 @@ export function AppLayout() {
       </aside>
 
       <div className={collapsed ? 'lg:pl-16' : 'lg:pl-64'}>
-        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/95 px-4 backdrop-blur-sm sm:px-6 dark:border-slate-800 dark:bg-slate-900/95">
+        <header className="sticky top-0 z-20 flex h-16 items-center gap-3 border-b border-outline-variant bg-surface/95 px-4 backdrop-blur-sm sm:px-6">
           <button
             type="button"
             className="btn btn-ghost btn-icon"
@@ -192,7 +192,7 @@ export function AppLayout() {
             )}
           </button>
 
-          <h1 className="truncate text-lg font-semibold tracking-tight text-slate-900 dark:text-slate-50">
+          <h1 className="truncate text-lg font-semibold tracking-tight text-on-surface">
             {current.label}
           </h1>
 

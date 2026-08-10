@@ -55,22 +55,22 @@ export function Modal({
         // wrapper below stops propagation for everything inside it.
         if (event.target === ref.current) onClose();
       }}
-      className="m-auto w-full bg-transparent p-3 backdrop:bg-slate-900/60"
+      className="m-auto w-full bg-transparent p-3 backdrop:bg-scrim/60"
     >
       <div
-        className={`mx-auto flex max-h-[calc(100dvh-1.5rem)] w-full flex-col rounded-lg border border-slate-200 bg-white text-left shadow-xl dark:border-slate-800 dark:bg-slate-900 ${widths[size]}`}
+        className={`mx-auto flex max-h-[calc(100dvh-1.5rem)] w-full flex-col rounded-lg border border-outline-variant bg-surface text-left shadow-xl ${widths[size]}`}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className="flex items-start justify-between gap-4 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+        <header className="flex items-start justify-between gap-4 border-b border-outline-variant px-5 py-4">
           <div>
             <h2
               id={titleId}
-              className="text-base font-semibold text-slate-900 dark:text-slate-100"
+              className="text-base font-semibold text-on-surface"
             >
               {title}
             </h2>
             {description ? (
-              <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+              <p className="mt-1 text-sm text-on-surface-variant">
                 {description}
               </p>
             ) : null}

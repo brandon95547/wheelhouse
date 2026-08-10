@@ -8,7 +8,10 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "check:contrast": "node scripts/check-contrast.mjs",
+    "check:tokens": "node scripts/check-tokens.mjs",
+    "check": "npm run typecheck && npm run check:contrast && npm run check:tokens"
   },
   "dependencies": {
     "lucide-react": "^1.27.0",

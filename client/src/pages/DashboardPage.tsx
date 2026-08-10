@@ -25,8 +25,8 @@ function Panel({
 }) {
   return (
     <section className="card flex flex-col">
-      <header className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-        <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+      <header className="flex items-center justify-between gap-3 border-b border-outline-variant px-4 py-3">
+        <h2 className="text-sm font-semibold text-on-surface">
           {title}
         </h2>
         {action ? (
@@ -42,7 +42,7 @@ function Panel({
 
 function PanelEmpty({ message }: { message: string }) {
   return (
-    <p className="px-4 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+    <p className="px-4 py-8 text-center text-sm text-on-surface-muted">
       {message}
     </p>
   );
@@ -114,19 +114,19 @@ export function DashboardPage() {
             {data.follow_ups.length === 0 ? (
               <PanelEmpty message="Nothing is due right now." />
             ) : (
-              <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+              <ul className="divide-y divide-outline-variant">
                 {data.follow_ups.map((item) => (
                   <li key={`${item.kind}-${item.id}`} className="px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                        <p className="truncate text-sm font-medium text-on-surface">
                           {item.label}
                         </p>
-                        <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        <p className="truncate text-xs text-on-surface-muted">
                           {item.detail || (item.kind === 'lead' ? 'Lead' : 'Contact')}
                         </p>
                       </div>
-                      <span className="shrink-0 text-xs font-medium text-amber-700 dark:text-amber-400">
+                      <span className="shrink-0 text-xs font-medium text-warning-text">
                         {relativeDay(item.due_date)}
                       </span>
                     </div>
@@ -140,13 +140,13 @@ export function DashboardPage() {
             {data.upcoming_events.length === 0 ? (
               <PanelEmpty message="No events scheduled yet." />
             ) : (
-              <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+              <ul className="divide-y divide-outline-variant">
                 {data.upcoming_events.map((event) => (
                   <li key={event.id} className="px-4 py-3">
-                    <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                    <p className="truncate text-sm font-medium text-on-surface">
                       {event.title}
                     </p>
-                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-on-surface-muted">
                       <span>{formatDate(event.date)}</span>
                       {event.time ? <span>{formatTime(event.time)}</span> : null}
                       <Badge>{event.event_type}</Badge>
@@ -161,22 +161,22 @@ export function DashboardPage() {
             {data.active_projects.length === 0 ? (
               <PanelEmpty message="No active projects." />
             ) : (
-              <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+              <ul className="divide-y divide-outline-variant">
                 {data.active_projects.map((project) => (
                   <li key={project.id} className="px-4 py-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                        <p className="truncate text-sm font-medium text-on-surface">
                           {project.name}
                         </p>
-                        <p className="truncate text-xs text-slate-500 dark:text-slate-400">
+                        <p className="truncate text-xs text-on-surface-muted">
                           {project.contact_name ?? 'No client assigned'}
                         </p>
                       </div>
                       <div className="shrink-0 text-right">
                         <Badge>{project.status}</Badge>
                         {project.due_date ? (
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          <p className="mt-1 text-xs text-on-surface-muted">
                             Due {formatDate(project.due_date)}
                           </p>
                         ) : null}

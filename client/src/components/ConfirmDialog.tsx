@@ -39,9 +39,9 @@ export function ConfirmDialog({
       size="sm"
     >
       <div className="px-5 py-4">
-        <p className="text-sm text-slate-700 dark:text-slate-300">{message}</p>
+        <p className="text-sm text-on-surface-variant">{message}</p>
       </div>
-      <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+      <div className="flex justify-end gap-2 border-t border-outline-variant px-5 py-4">
         <button
           type="button"
           className="btn btn-secondary"

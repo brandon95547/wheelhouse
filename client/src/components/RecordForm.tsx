@@ -161,7 +161,7 @@ export function RecordForm({
       <div className="px-5 py-4">
         {formError ? (
           <div
-            className="mb-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200"
+            className="mb-4 flex items-start gap-2 rounded-md border border-danger/40 bg-danger-container px-3 py-2 text-sm text-on-danger-container"
             role="alert"
           >
             <AlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
@@ -198,7 +198,7 @@ export function RecordForm({
                 <label className="label" htmlFor={id}>
                   {field.label}
                   {field.required ? (
-                    <span className="ml-0.5 text-red-600 dark:text-red-400" aria-hidden="true">
+                    <span className="ml-0.5 text-danger-text" aria-hidden="true">
                       *
                     </span>
                   ) : null}
@@ -233,7 +233,7 @@ export function RecordForm({
                 )}
 
                 {field.help && !error ? (
-                  <p id={`${id}-help`} className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
+                  <p id={`${id}-help`} className="mt-1.5 text-xs text-on-surface-muted">
                     {field.help}
                   </p>
                 ) : null}
@@ -248,7 +248,7 @@ export function RecordForm({
         </div>
       </div>
 
-      <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+      <div className="flex justify-end gap-2 border-t border-outline-variant px-5 py-4">
         <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={busy}>
           Cancel
         </button>

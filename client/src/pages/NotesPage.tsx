@@ -142,10 +142,10 @@ export function NotesPage() {
               return (
                 <li
                   key={note.id}
-                  className="flex flex-col rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950"
+                  className="flex flex-col rounded-lg border border-outline-variant bg-background p-4"
                 >
                   <div className="flex items-start justify-between gap-2">
-                    <h3 className="font-medium text-slate-900 dark:text-slate-100">
+                    <h3 className="font-medium text-on-surface">
                       {note.title}
                     </h3>
                     <div className="flex shrink-0 gap-1">
@@ -159,7 +159,7 @@ export function NotesPage() {
                       </button>
                       <button
                         type="button"
-                        className="btn btn-ghost btn-sm p-1 text-red-600 dark:text-red-400"
+                        className="btn btn-ghost btn-sm p-1 text-danger-text"
                         onClick={() => crud.requestDelete(note)}
                         aria-label={`Delete ${note.title}`}
                       >
@@ -169,7 +169,7 @@ export function NotesPage() {
                   </div>
 
                   {note.body ? (
-                    <p className="mt-2 line-clamp-6 text-sm whitespace-pre-wrap text-slate-600 dark:text-slate-400">
+                    <p className="mt-2 line-clamp-6 text-sm whitespace-pre-wrap text-on-surface-variant">
                       {note.body}
                     </p>
                   ) : null}
@@ -181,7 +181,7 @@ export function NotesPage() {
                           key={tag}
                           type="button"
                           onClick={() => setSearchInput(tag)}
-                          className="badge cursor-pointer bg-slate-100 text-slate-700 ring-slate-500/20 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-400/20 dark:hover:bg-slate-700"
+                          className="badge cursor-pointer bg-surface-container text-on-surface-variant ring-outline hover:bg-surface-container-high"
                           aria-label={`Filter notes by the tag ${tag}`}
                         >
                           <Tag className="size-3" aria-hidden="true" />
@@ -192,12 +192,12 @@ export function NotesPage() {
                   ) : null}
 
                   {links.length ? (
-                    <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                    <p className="mt-3 text-xs text-on-surface-muted">
                       {links.join(' · ')}
                     </p>
                   ) : null}
 
-                  <p className="mt-3 border-t border-slate-200 pt-2 text-xs text-slate-400 dark:border-slate-800 dark:text-slate-500">
+                  <p className="mt-3 border-t border-outline-variant pt-2 text-xs text-on-surface-muted">
                     Updated {formatDateTime(note.updated_at)}
                   </p>
                 </li>

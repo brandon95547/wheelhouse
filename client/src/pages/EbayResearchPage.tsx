@@ -48,11 +48,11 @@ function ListingImage({ src, alt }: { src: string | null; alt: string }) {
   if (!src || failed) {
     return (
       <div
-        className="grid size-14 place-items-center rounded border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800"
+        className="grid size-14 place-items-center rounded border border-outline-variant bg-surface-container"
         role="img"
         aria-label="No image available"
       >
-        <ImageOff className="size-4 text-slate-400" aria-hidden="true" />
+        <ImageOff className="size-4 text-on-surface-muted" aria-hidden="true" />
       </div>
     );
   }
@@ -64,7 +64,7 @@ function ListingImage({ src, alt }: { src: string | null; alt: string }) {
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={() => setFailed(true)}
-      className="size-14 rounded border border-slate-200 object-cover dark:border-slate-800"
+      className="size-14 rounded border border-outline-variant object-cover"
     />
   );
 }
@@ -194,7 +194,7 @@ export function EbayResearchPage() {
           </button>
         </div>
 
-        <p className="mt-3 flex items-start gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <p className="mt-3 flex items-start gap-2 text-xs text-on-surface-muted">
           <Puzzle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
           <span>
             Opens eBay's sold and completed listings in a new tab using your normal browser
@@ -295,7 +295,7 @@ export function EbayResearchPage() {
           <TableScroll>
             <table className="w-full border-collapse">
               <caption className="sr-only">Imported eBay sold listings</caption>
-              <thead className="border-b border-slate-200 dark:border-slate-800">
+              <thead className="border-b border-outline-variant">
                 <tr>
                   <th scope="col" className="th">Image</th>
                   <th scope="col" className="th">Title</th>
@@ -309,18 +309,18 @@ export function EbayResearchPage() {
                   <th scope="col" className="th text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              <tbody className="divide-y divide-outline-variant">
                 {rows.map((listing) => (
-                  <tr key={listing.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr key={listing.id} className="hover:bg-surface-container">
                     <td className="td">
                       <ListingImage src={listing.image_url} alt={listing.title} />
                     </td>
                     <td className="td">
-                      <p className="max-w-sm text-slate-900 dark:text-slate-100">
+                      <p className="max-w-sm text-on-surface">
                         {listing.title}
                       </p>
                       {listing.item_id ? (
-                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                        <p className="mt-0.5 text-xs text-on-surface-muted">
                           Item {listing.item_id}
                         </p>
                       ) : null}
@@ -341,7 +341,7 @@ export function EbayResearchPage() {
                     <td className="td whitespace-nowrap">{formatDate(listing.sold_date)}</td>
                     <td className="td">{listing.condition ?? '—'}</td>
                     <td className="td whitespace-nowrap">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-on-surface-muted">
                         {listing.category_group}
                       </span>
                       <br />
@@ -365,7 +365,7 @@ export function EbayResearchPage() {
                         ) : null}
                         <button
                           type="button"
-                          className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                          className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                           onClick={() => deleteListing(listing)}
                           aria-label={`Remove "${listing.title}" from Wheelhouse`}
                         >

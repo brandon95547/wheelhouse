@@ -121,8 +121,8 @@ export function CalendarPage() {
       />
 
       <div className="card">
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-4 dark:border-slate-800">
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <div className="flex flex-wrap items-center gap-2 border-b border-outline-variant p-4">
+          <h2 className="text-base font-semibold text-on-surface">
             {monthLabel}
           </h2>
           <div className="ml-auto flex items-center gap-1">
@@ -161,13 +161,13 @@ export function CalendarPage() {
                 {WEEKDAYS.map((day) => (
                   <div
                     key={day}
-                    className="pb-2 text-center text-xs font-semibold tracking-wide text-slate-500 uppercase dark:text-slate-400"
+                    className="pb-2 text-center text-xs font-semibold tracking-wide text-on-surface-muted uppercase"
                   >
                     {day}
                   </div>
                 ))}
               </div>
-              <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-slate-200 bg-slate-200 dark:border-slate-800 dark:bg-slate-800">
+              <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-outline-variant bg-surface-container-high">
                 {gridDays.map((date) => {
                   const iso = toIsoDate(date);
                   const inMonth = date.getMonth() === cursor.month;
@@ -177,19 +177,19 @@ export function CalendarPage() {
                       key={iso}
                       className={`min-h-24 p-1.5 ${
                         inMonth
-                          ? 'bg-white dark:bg-slate-900'
-                          : 'bg-slate-50 dark:bg-slate-950'
+                          ? 'bg-surface'
+                          : 'bg-background'
                       }`}
                     >
                       <button
                         type="button"
                         onClick={() => openForDate(iso)}
-                        className={`mb-1 flex size-6 cursor-pointer items-center justify-center rounded text-xs font-medium tabular-nums transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 ${
+                        className={`mb-1 flex size-6 cursor-pointer items-center justify-center rounded text-xs font-medium tabular-nums transition-colors hover:bg-surface-container-high ${
                           iso === today
-                            ? 'bg-brand-600 text-white hover:bg-brand-700'
+                            ? 'bg-primary text-on-primary hover:bg-primary-hover'
                             : inMonth
-                              ? 'text-slate-700 dark:text-slate-300'
-                              : 'text-slate-400 dark:text-slate-600'
+                              ? 'text-on-surface-variant'
+                              : 'text-on-surface-muted'
                         }`}
                         aria-label={`Add an event on ${formatDate(iso)}`}
                       >
@@ -201,7 +201,7 @@ export function CalendarPage() {
                             <button
                               type="button"
                               onClick={() => crud.openEdit(event)}
-                              className="block w-full cursor-pointer truncate rounded bg-brand-50 px-1.5 py-0.5 text-left text-xs text-brand-800 hover:bg-brand-100 dark:bg-brand-950 dark:text-brand-200 dark:hover:bg-brand-900"
+                              className="block w-full cursor-pointer truncate rounded bg-primary-container px-1.5 py-0.5 text-left text-xs text-on-primary-container hover:bg-primary-container/70"
                               title={event.title}
                             >
                               {event.time ? `${formatTime(event.time)} ` : ''}
@@ -210,7 +210,7 @@ export function CalendarPage() {
                           </li>
                         ))}
                         {dayEvents.length > 3 ? (
-                          <li className="px-1.5 text-xs text-slate-500 dark:text-slate-400">
+                          <li className="px-1.5 text-xs text-on-surface-muted">
                             +{dayEvents.length - 3} more
                           </li>
                         ) : null}
@@ -225,8 +225,8 @@ export function CalendarPage() {
       </div>
 
       <div className="card mt-6">
-        <header className="border-b border-slate-200 px-4 py-3 dark:border-slate-800">
-          <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+        <header className="border-b border-outline-variant px-4 py-3">
+          <h2 className="text-sm font-semibold text-on-surface">
             Events in {monthLabel}
           </h2>
         </header>
@@ -250,30 +250,30 @@ export function CalendarPage() {
             }
           />
         ) : (
-          <ul className="divide-y divide-slate-200 dark:divide-slate-800">
+          <ul className="divide-y divide-outline-variant">
             {monthEvents.map((event) => (
               <li key={event.id} className="flex items-start gap-4 px-4 py-3">
                 <div className="w-24 shrink-0">
-                  <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                  <p className="text-sm font-medium text-on-surface">
                     {formatDate(event.date)}
                   </p>
                   {event.time ? (
-                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                    <p className="text-xs text-on-surface-muted">
                       {formatTime(event.time)}
                     </p>
                   ) : null}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-medium text-slate-900 dark:text-slate-100">
+                  <p className="font-medium text-on-surface">
                     {event.title}
                   </p>
-                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-on-surface-muted">
                     <Badge>{event.event_type}</Badge>
                     {event.contact_name ? <span>{event.contact_name}</span> : null}
                     {event.project_name ? <span>· {event.project_name}</span> : null}
                   </p>
                   {event.notes ? (
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                    <p className="mt-1 text-xs text-on-surface-variant">
                       {event.notes}
                     </p>
                   ) : null}
@@ -289,7 +289,7 @@ export function CalendarPage() {
                   </button>
                   <button
                     type="button"
-                    className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                    className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                     onClick={() => crud.requestDelete(event)}
                     aria-label={`Delete ${event.title}`}
                   >

@@ -155,7 +155,7 @@ export function LeadsPage() {
           <TableScroll>
             <table className="w-full border-collapse">
               <caption className="sr-only">Leads</caption>
-              <thead className="border-b border-slate-200 dark:border-slate-800">
+              <thead className="border-b border-outline-variant">
                 <tr>
                   <th scope="col" className="th">Lead</th>
                   <th scope="col" className="th">Contact</th>
@@ -166,25 +166,25 @@ export function LeadsPage() {
                   <th scope="col" className="th text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+              <tbody className="divide-y divide-outline-variant">
                 {filtered.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                  <tr key={lead.id} className="hover:bg-surface-container">
                     <td className="td">
-                      <p className="font-medium text-slate-900 dark:text-slate-100">
+                      <p className="font-medium text-on-surface">
                         {lead.name}
                       </p>
                       {lead.business_name ? (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
+                        <p className="text-xs text-on-surface-muted">
                           {lead.business_name}
                         </p>
                       ) : null}
                       {lead.notes ? (
-                        <p className="mt-1 line-clamp-2 max-w-xs text-xs text-slate-500 dark:text-slate-400">
+                        <p className="mt-1 line-clamp-2 max-w-xs text-xs text-on-surface-muted">
                           {lead.notes}
                         </p>
                       ) : null}
                       {lead.converted_contact_name ? (
-                        <p className="mt-1 text-xs text-emerald-700 dark:text-emerald-400">
+                        <p className="mt-1 text-xs text-success-text">
                           Converted → {lead.converted_contact_name}
                         </p>
                       ) : null}
@@ -212,7 +212,7 @@ export function LeadsPage() {
                           </a>
                         ) : null}
                         {!lead.email && !lead.phone && !lead.website ? (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-on-surface-muted">—</span>
                         ) : null}
                       </div>
                     </td>
@@ -227,8 +227,8 @@ export function LeadsPage() {
                           <span
                             className={`text-xs ${
                               isOverdue(lead.follow_up_date)
-                                ? 'font-medium text-amber-700 dark:text-amber-400'
-                                : 'text-slate-500 dark:text-slate-400'
+                                ? 'font-medium text-warning-text'
+                                : 'text-on-surface-muted'
                             }`}
                           >
                             {relativeDay(lead.follow_up_date)}
@@ -268,7 +268,7 @@ export function LeadsPage() {
                         </button>
                         <button
                           type="button"
-                          className="btn btn-ghost btn-icon text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                          className="btn btn-ghost btn-icon text-danger-text hover:bg-danger-container"
                           onClick={() => crud.requestDelete(lead)}
                           aria-label={`Delete ${lead.name}`}
                         >
@@ -331,11 +331,11 @@ export function LeadsPage() {
               </option>
             ))}
           </select>
-          <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+          <p className="mt-2 text-xs text-on-surface-muted">
             Converting to a client also marks the lead as Won.
           </p>
         </div>
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4 dark:border-slate-800">
+        <div className="flex justify-end gap-2 border-t border-outline-variant px-5 py-4">
           <button
             type="button"
             className="btn btn-secondary"
