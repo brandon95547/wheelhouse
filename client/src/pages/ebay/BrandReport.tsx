@@ -12,8 +12,8 @@
  *
  * Nothing changes until "Apply" is pressed, and locked brands never change at all.
  */
-import { useState } from 'react';
-import { AlertTriangle, Check, Gem, Lock, RefreshCw, Store, TrendingDown } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { AlertTriangle, Check, Gem, Lock, RefreshCw, Sparkles, Store, TrendingDown } from 'lucide-react';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
@@ -53,10 +53,74 @@ const STRENGTH: Record<
 
 const pct = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
+interface ClassifyStatus {
+  running: boolean;
+  startedAt: string | null;
+  finishedAt: string | null;
+  listingCount: number;
+  result: { applied: number; created: number; skipped: number; models: number } | null;
+  error: string | null;
+  aiConfigured: boolean;
+}
+
+/**
+ * Reads the classification job while it runs.
+ *
+ * Polls only while something is happening. A job that takes a minute with no visible sign
+ * of life is the failure this whole panel exists to prevent — an empty Brands tab looked
+ * exactly like a broken one.
+ */
+function useClassifyStatus(onFinish: () => void) {
+  const [status, setStatus] = useState<ClassifyStatus | null>(null);
+  const wasRunning = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const read = async () => {
+      try {
+        const next = await api.get<ClassifyStatus>('/ebay/brands/classify');
+        if (cancelled) return;
+        setStatus(next);
+        if (wasRunning.current && !next.running) onFinish();
+        wasRunning.current = next.running;
+      } catch {
+        /* The panel is a progress readout; a failed poll is not worth a toast. */
+      }
+    };
+
+    read();
+    const timer = setInterval(read, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [onFinish]);
+
+  return { status, setStatus };
+}
+
 export function BrandReport() {
   const toast = useToast();
   const [applying, setApplying] = useState(false);
   const analysis = useApi<BrandAnalysis>('/ebay/brands/analysis');
+
+  const onFinish = useCallback(() => {
+    analysis.reload();
+    toast.success('Brand classification finished.');
+  }, [analysis, toast]);
+
+  const { status, setStatus } = useClassifyStatus(onFinish);
+
+  async function classify() {
+    try {
+      const next = await api.post<ClassifyStatus & { message: string }>('/ebay/brands/classify');
+      setStatus(next);
+      toast.success(next.message);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not start classification.');
+    }
+  }
 
   async function apply() {
     setApplying(true);
@@ -73,17 +137,71 @@ export function BrandReport() {
     }
   }
 
-  if (analysis.loading && !analysis.data) return <LoadingState label="Scoring every brand…" />;
+  /* The classify panel renders BEFORE any early return. When the brand book is empty this
+     panel is the only thing that can fill it, so hiding it behind "nothing to report yet"
+     would hide the button that fixes exactly that. */
+  const classifyPanel = (
+    <section className="card p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+        <div className="min-w-0">
+          <h2 className="text-sm font-semibold text-on-surface">Classify brands from your listings</h2>
+          <p className="mt-1 text-xs text-on-surface-muted">
+            Reads every imported sold listing and sorts the brands into Rare, Common and Not
+            worth it. Runs over everything you have imported, not just the last scan, so you
+            can rebuild the book at any time without re-scanning eBay. Takes about a minute.
+          </p>
+          {status?.running ? (
+            <p className="mt-2 flex items-center gap-2 text-xs text-on-surface">
+              <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+              Working through {status.listingCount} listing{status.listingCount === 1 ? '' : 's'}…
+            </p>
+          ) : status?.error ? (
+            <p className="mt-2 flex items-start gap-1.5 text-xs text-danger-text">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {status.error}
+            </p>
+          ) : status?.result ? (
+            <p className="mt-2 text-xs text-on-surface-muted">
+              Last run: {status.result.applied} brand{status.result.applied === 1 ? '' : 's'} filed
+              ({status.result.created} new, {status.result.models} models
+              {status.result.skipped ? `, ${status.result.skipped} left alone` : ''}).
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary shrink-0 sm:ml-auto"
+          onClick={classify}
+          disabled={status?.running || status?.aiConfigured === false}
+        >
+          <Sparkles className="size-4" aria-hidden="true" />
+          {status?.running ? 'Classifying…' : 'Classify brands'}
+        </button>
+      </div>
+    </section>
+  );
+
+  if (analysis.loading && !analysis.data) {
+    return (
+      <div className="space-y-6">
+        {classifyPanel}
+        <LoadingState label="Scoring every brand…" />
+      </div>
+    );
+  }
   if (analysis.error) return <ErrorState message={analysis.error} onRetry={analysis.reload} />;
 
   const proposals = analysis.data?.proposals ?? [];
   if (!proposals.length) {
     return (
-      <EmptyState
-        icon={Gem}
-        title="Nothing to report yet"
-        description="Import some sold listings and the report will score every brand against what actually sold."
-      />
+      <div className="space-y-6">
+        {classifyPanel}
+        <EmptyState
+          icon={Gem}
+          title="No brands yet"
+          description="Import sold listings, then press Classify brands to sort them into Rare, Common and Not worth it."
+        />
+      </div>
     );
   }
 
@@ -100,6 +218,8 @@ export function BrandReport() {
 
   return (
     <div className="space-y-6">
+      {classifyPanel}
+
       <section className="card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
           <div className="min-w-0">

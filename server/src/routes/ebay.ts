@@ -18,8 +18,8 @@ import {
   resolveTier,
   upsertBrands,
 } from '../lib/brands.js';
-import { analyseBrands, applyAiVerdicts, applyProposals } from '../lib/brand-analysis.js';
-import { classifyListings } from '../lib/brand-ai.js';
+import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
+import { classifyStatus, startClassification } from '../lib/classify-job.js';
 import { aiConfigured } from '../lib/deepseek.js';
 import { MIN_SAMPLE, RARE_GATES } from '../lib/brand-strength.js';
 
@@ -134,9 +134,7 @@ router.get('/stats', (req, res) => {
  * Receives listings scraped from the page the user is already looking at.
  * Nothing here contacts eBay — the extension posts what was on screen.
  */
-// async: the AI classification below is awaited. Express 5 forwards a rejected handler
-// to the error middleware on its own, so no wrapper is needed.
-router.post('/import', async (req, res) => {
+router.post('/import', (req, res) => {
   const body = (req.body ?? {}) as Record<string, unknown>;
   const category = resolveCategory(body.category ?? body.categorySlug ?? body.category_id);
 
@@ -201,28 +199,22 @@ router.post('/import', async (req, res) => {
   const duplicates = valid.length - imported + duplicatesInBatch;
 
   /* New sales are new evidence, so the tiers are settled here rather than waiting for
-     someone to ask.
-
-     DeepSeek first, because it can read a brand out of a mangled title and the statistics
-     cannot. If it is unconfigured or unreachable the statistical scorer runs instead —
-     the import must not depend on a third party being up. */
-  let aiResult: { applied: number; skipped: number; created: number } | null = null;
+     someone to ask. DeepSeek does the judging, because it can read a brand out of a
+     mangled title and the statistics cannot; the scorer stands in only when there is no
+     key at all, so an import never depends on a third party being up. */
   let rescored = { applied: 0, skipped: 0 };
 
-  if (imported > 0) {
-    // The batch that just arrived, judged as a whole — a brand's cheap sales are what
-    // separate it from a rare one, so the set has to stay together.
-    const verdicts = await classifyListings(
-      valid.map((l) => ({ title: l.title, sold_price: l.sold_price })),
-    );
+  /* Started, NOT awaited. Classification takes the better part of a minute; waiting for it
+     inside the import is what made the extension time out and left the user staring at
+     listings with no brands. It also runs whenever the payload had usable listings — not
+     only when rows were inserted — because re-scanning the same page dedupes everything
+     and previously skipped classification altogether, leaving no way to retry. */
+  const classifying = valid.length > 0 && aiConfigured() ? startClassification() : false;
 
-    if (verdicts) {
-      aiResult = applyAiVerdicts(verdicts);
-    } else {
-      // Only when there was no AI at all. It cannot create brands — it re-tiers rows that
-      // already exist — so this is a safety net, not a substitute.
-      rescored = applyProposals(analyseBrands());
-    }
+  // Only when there is no AI at all. The scorer cannot create brands — it re-tiers rows
+  // that already exist — so it is a safety net, not a substitute.
+  if (imported > 0 && !aiConfigured()) {
+    rescored = applyProposals(analyseBrands());
   }
 
   res.status(201).json({
@@ -231,19 +223,20 @@ router.post('/import', async (req, res) => {
     duplicates,
     failed: failed.length,
     errors: failed.slice(0, 25),
-    retiered: rescored.applied + (aiResult?.applied ?? 0),
-    ai: aiResult ? { ...aiResult, used: true } : { used: false },
+    retiered: rescored.applied,
+    // The brand book fills in after this response. Say so, rather than let an empty
+    // Brands tab read as a failure.
+    classifying,
     category: { slug: category.slug, name: category.name, group: category.group_name },
     message:
-      imported > 0
-        ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.` +
-          (aiResult
-            ? ` ${aiResult.applied} brand${aiResult.applied === 1 ? '' : 's'} classified (${aiResult.created} new).`
-            : ' Brands tiered from sold prices — AI classification unavailable.') +
-          (rescored.applied
-            ? ` ${rescored.applied} re-tiered on the numbers.`
-            : '')
-        : 'No new listings were imported.',
+      (imported > 0
+        ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.`
+        : 'No new listings — every one was already imported.') +
+      (classifying
+        ? ' Classifying brands now; they will appear in the Brands tab shortly.'
+        : aiConfigured()
+          ? ''
+          : ' Brands tiered from sold prices — AI classification unavailable.'),
   });
 });
 
@@ -319,6 +312,37 @@ router.get('/brands/analysis', (_req, res) => {
       locked: proposals.filter((p) => p.locked).length,
     },
   });
+});
+
+/**
+ * Classify the listings already stored — the button that rebuilds the brand book.
+ *
+ * Runs against everything imported, not just the last scan, so a book can be rebuilt at
+ * any time without re-scanning eBay. Returns immediately; poll the GET below.
+ */
+router.post('/brands/classify', (req, res) => {
+  if (!aiConfigured()) {
+    throw badRequest('Validation failed', [
+      { field: 'ai', message: 'DEEPSEEK_API_KEY is not set, so brands cannot be classified.' },
+    ]);
+  }
+
+  const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+  const categoryId = category && category !== 'all' ? resolveCategory(category).id : undefined;
+
+  const started = startClassification(categoryId);
+  res.status(started ? 202 : 409).json({
+    started,
+    ...classifyStatus(),
+    message: started
+      ? 'Classifying brands from the imported listings. This takes about a minute.'
+      : 'A classification run is already in progress.',
+  });
+});
+
+/** How the current or last classification run went. */
+router.get('/brands/classify', (_req, res) => {
+  res.json({ ...classifyStatus(), aiConfigured: aiConfigured() });
 });
 
 /** Re-score every brand and write the tiers the evidence supports. */

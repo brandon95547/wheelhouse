@@ -174,13 +174,19 @@ export function analyseBrands(): BrandProposal[] {
  */
 interface AiVerdictInput {
   name: string;
-  tier: 'rare' | 'common' | 'not_worthy';
+  tier: 'rare' | 'common' | 'not_worthy' | 'unsorted';
   models: string[];
   lookFor: string | null;
 }
 
 /** Strongest first. A stray second mention must not demote a brand already judged well. */
-const TIER_RANK: Record<AiVerdictInput['tier'], number> = { rare: 3, common: 2, not_worthy: 1 };
+const TIER_RANK: Record<AiVerdictInput['tier'], number> = {
+  rare: 4,
+  common: 3,
+  not_worthy: 2,
+  // Lowest: "I could not tell" must never displace an actual judgement of the same brand.
+  unsorted: 1,
+};
 
 /**
  * Collapse verdicts that are the same brand.

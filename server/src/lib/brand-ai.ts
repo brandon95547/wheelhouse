@@ -16,13 +16,14 @@
  * which needs no third party. An import must never die because an API is down.
  */
 import { chatJSON, aiConfigured } from './deepseek.js';
+import { normaliseBrand } from './brands.js';
 
 export interface AiListing {
   title: string;
   sold_price: number | null;
 }
 
-export type AiTier = 'rare' | 'common' | 'not_worthy';
+export type AiTier = 'rare' | 'common' | 'not_worthy' | 'unsorted';
 
 export interface AiBrandVerdict {
   name: string;
@@ -32,6 +33,19 @@ export interface AiBrandVerdict {
   lookFor: string | null;
   reasoning: string;
 }
+
+/**
+ * Sales a brand needs before any verdict about it is kept.
+ *
+ * ASKED FOR IN THE PROMPT, ENFORCED HERE, because asking was not enough. Told plainly to
+ * answer "unsorted" when a brand had too few listings to judge, the model still returned
+ * not_worthy for a boot that had sold once, for $600 — a book that says "skip this" about
+ * a $600 boot is worse than no book at all.
+ *
+ * Three is the smallest number that can show a pattern rather than an incident. Below it
+ * the brand is filed unsorted with its sales intact, and judged once more have accumulated.
+ */
+const MIN_EVIDENCE = 3;
 
 /**
  * Listings per call. The batch is meant to go over whole; this only exists so a scan far
@@ -81,6 +95,20 @@ Use Not Worthy when the brand generally does not have enough resale value AND yo
 
 A few unusually expensive sales should not prevent a brand from being classified Not Worthy.
 
+### UNSORTED
+
+Use Unsorted when the batch contains too few listings from a brand to judge it at all.
+
+With only one or two sales you cannot tell whether the brand's value is consistent or
+concentrated in a particular model — both look identical. Say so rather than guessing.
+
+This matters most for expensive one-offs. A single boot that sold for $600 is not evidence
+that the brand is Rare, and it is certainly not evidence that it is Not Worthy. It is one
+sale. Return Unsorted and it will be judged later, when more of its sales have been seen.
+
+NEVER return Not Worthy because you have too little data. Not Worthy means the sales show
+the brand does not sell — not that you could not tell.
+
 ### HOW TO JUDGE THE DATA
 
 Use the ENTIRE set of sold listings for each brand.
@@ -126,6 +154,13 @@ Return JSON only:
 "models": [],
 "lookFor": null,
 "reasoning": "Short explanation based on the sold listings."
+},
+{
+"name": "Brand Name",
+"tier": "unsorted",
+"models": [],
+"lookFor": null,
+"reasoning": "Only 2 sales in this batch — not enough to judge the brand."
 }
 ]
 }
@@ -138,7 +173,11 @@ Important:
 
 **Not Worthy = neither the brand nor identifiable models provide a strong enough resale signal.**
 
-Analyze patterns across ALL provided sold listings rather than making decisions from a few high-priced examples.`;
+**Unsorted = too few listings from this brand to judge it either way.**
+
+Analyze patterns across ALL provided sold listings rather than making decisions from a few high-priced examples.
+
+Keep every "reasoning" under 20 words. Be terse — a scan can contain sixty brands and the reply must fit in one response.`;
 
 interface RawVerdict {
   name?: unknown;
@@ -164,15 +203,38 @@ function isVague(lookFor: string, models: string[]): boolean {
     .test(lookFor);
 }
 
+/**
+ * How many of these listings mention this brand.
+ *
+ * Word-boundary match on the same normaliser the slug uses, so "Dr. Martens" counts
+ * "Dr Martens". Approximate by nature — a listing that never names its brand cannot be
+ * counted — but it only ever withholds a verdict, never invents one.
+ */
+function evidenceFor(name: string, listings: AiListing[]): number {
+  const needle = normaliseBrand(name).split(' ').filter(Boolean);
+  if (!needle.length) return 0;
+
+  let count = 0;
+  for (const listing of listings) {
+    const words = normaliseBrand(listing.title).split(' ').filter(Boolean);
+    for (let i = 0; i + needle.length <= words.length; i += 1) {
+      if (needle.every((w, k) => words[i + k] === w)) { count += 1; break; }
+    }
+  }
+  return count;
+}
+
 /** One call. Returns the brands it could identify, or null if the model was unusable. */
 async function classifyChunk(listings: AiListing[]): Promise<AiBrandVerdict[] | null> {
   const result = await chatJSON<{ brands?: unknown }>({
     system: SYSTEM,
     user: JSON.stringify({ listings: listings.map(asLine) }),
-    /* Measured: 151 listings -> 56 brands -> ~4,400 completion tokens. The headroom is
-       for a denser scan, and costs nothing when unused. */
-    maxTokens: 16000,
-    timeoutMs: 120_000,
+    /* Sized so ONE call suffices. Measured on 151 listings -> 59 brands: 16,000 truncated
+       and the retry re-ran the entire call at 48,000, turning a 40-second job into 97.
+       A retry here is not a cheap correction, it is doing everything twice. Unused budget
+       costs nothing — only emitted tokens are billed. */
+    maxTokens: 32000,
+    timeoutMs: 180_000,
   });
   if (!result) return null;
 
@@ -184,7 +246,7 @@ async function classifyChunk(listings: AiListing[]): Promise<AiBrandVerdict[] | 
     if (name.length < 2 || name.length > 60) continue;
 
     const tier = String(row?.tier ?? '').toLowerCase().replace(/[\s-]/g, '_');
-    if (tier !== 'rare' && tier !== 'common' && tier !== 'not_worthy') continue;
+    if (!['rare', 'common', 'not_worthy', 'unsorted'].includes(tier)) continue;
 
     const models = (Array.isArray(row?.models) ? row.models : [])
       .map((m) => String(m ?? '').replace(/\s+/g, ' ').trim())
@@ -196,8 +258,15 @@ async function classifyChunk(listings: AiListing[]): Promise<AiBrandVerdict[] | 
       .trim();
 
     // A common brand nobody can describe is not a common brand.
-    const finalTier: AiTier =
-      tier === 'common' && isVague(lookFor, models) ? 'not_worthy' : (tier as AiTier);
+    let finalTier: AiTier =
+      tier === 'common' && isVague(lookFor, models) ? 'unsorted' : (tier as AiTier);
+
+    /* The guard. A verdict resting on one or two sales describes those sales, not the
+       brand — in either direction, so a thin "rare" is withheld as readily as a thin
+       "not_worthy". The brand still gets a row, and its sales still accumulate. */
+    if (finalTier !== 'unsorted' && evidenceFor(name, listings) < MIN_EVIDENCE) {
+      finalTier = 'unsorted';
+    }
 
     verdicts.push({
       name,
