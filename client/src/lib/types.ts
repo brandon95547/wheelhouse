@@ -176,3 +176,43 @@ export interface AppInfo {
 }
 
 export type OptionLists = Record<string, string[]>;
+
+/* The brand book. `rare` means the label alone is reason to inspect; `common` means
+   only certain models carry value; `unsorted` is what an import found that no guide has
+   judged yet. */
+export type BrandTier = 'rare' | 'common' | 'unsorted';
+export type ModelVerdict = 'worthy' | 'not_worthy';
+
+export interface EbayBrandModel {
+  id: number;
+  slug: string;
+  name: string;
+  verdict: ModelVerdict;
+  verdict_source: string;
+  sold_count: number;
+  median_price: number | null;
+  high_price: number | null;
+  notes: string | null;
+}
+
+export interface EbayBrand {
+  id: number;
+  slug: string;
+  name: string;
+  tier: BrandTier;
+  tier_source: string;
+  kind: string | null;
+  sold_count: number;
+  rejected_count: number;
+  median_price: number | null;
+  high_price: number | null;
+  notes: string | null;
+  first_seen: string;
+  last_seen: string;
+  models: EbayBrandModel[];
+}
+
+export interface EbayBrandBook {
+  brands: EbayBrand[];
+  counts: { rare: number; common: number; unsorted: number };
+}

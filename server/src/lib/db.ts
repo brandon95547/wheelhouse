@@ -131,6 +131,72 @@ CREATE TABLE IF NOT EXISTS ebay_listings (
   imported_at    TEXT    NOT NULL
 );
 
+/* The brand book, learned from what actually sold.
+ *
+ * TWO TIERS, which is the whole point:
+ *
+ *   rare    the label alone is reason to inspect — you will not see many
+ *   common  the label is everywhere; only certain models carry value
+ *
+ * plus "unsorted" for brands seen in an import that no guide covers yet. Those are
+ * not noise: a brand selling repeatedly at real money that nobody has classified is
+ * exactly what the next revision of the guide should absorb, and they need somewhere
+ * to sit while that judgement is made.
+ *
+ * "slug" is the normalised name and it is UNIQUE, so "Dr. Martens", "Dr Martens" and
+ * "DR. MARTENS" are one row however many imports they arrive in.
+ *
+ * "price_samples" holds a bounded JSON array of observed sold prices. A running
+ * average would be cheaper, but the median is what matters for resale — one $900
+ * outlier should not crown a brand — and a median cannot be computed from a running
+ * total. Bounded so a brand with ten thousand sales does not grow without limit. */
+CREATE TABLE IF NOT EXISTS ebay_brands (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug           TEXT    NOT NULL UNIQUE,
+  name           TEXT    NOT NULL,
+  tier           TEXT    NOT NULL DEFAULT 'unsorted',
+  tier_source    TEXT    NOT NULL DEFAULT 'import',
+  kind           TEXT,
+  sold_count     INTEGER NOT NULL DEFAULT 0,
+  rejected_count INTEGER NOT NULL DEFAULT 0,
+  median_price   REAL,
+  high_price     REAL,
+  price_samples  TEXT    NOT NULL DEFAULT '[]',
+  notes          TEXT,
+  first_seen     TEXT    NOT NULL,
+  last_seen      TEXT    NOT NULL
+);
+
+/* Models within a brand, and the reason this table exists:
+ *
+ * "Nike Jordan" is worth picking up, but Nike made Jordan models that are not. A tier
+ * on the BRAND cannot express that, so the exception has to live one level down. Rows
+ * come from two places and both matter:
+ *
+ *   verdict = 'worthy'      what the guide named — Jordan, SB Dunk, 990
+ *   verdict = 'not_worthy'  an exclusion, almost always added by hand after seeing a
+ *                           model come back that should not have
+ *
+ * Exclusions are checked BEFORE inclusions, so a more specific "jordan delta" beats
+ * the broader "jordan" it sits inside. That ordering is what lets the book get more
+ * precise over time without anyone rewriting the guide. */
+CREATE TABLE IF NOT EXISTS ebay_brand_models (
+  id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  brand_id       INTEGER NOT NULL REFERENCES ebay_brands(id) ON DELETE CASCADE,
+  slug           TEXT    NOT NULL,
+  name           TEXT    NOT NULL,
+  verdict        TEXT    NOT NULL DEFAULT 'worthy',
+  verdict_source TEXT    NOT NULL DEFAULT 'guide',
+  sold_count     INTEGER NOT NULL DEFAULT 0,
+  median_price   REAL,
+  high_price     REAL,
+  price_samples  TEXT    NOT NULL DEFAULT '[]',
+  notes          TEXT,
+  first_seen     TEXT    NOT NULL,
+  last_seen      TEXT    NOT NULL,
+  UNIQUE (brand_id, slug)
+);
+
 /* Configuration table — seeded with the option lists the UI offers. */
 CREATE TABLE IF NOT EXISTS option_values (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -149,6 +215,8 @@ CREATE INDEX IF NOT EXISTS idx_projects_contact    ON projects(contact_id);
 CREATE INDEX IF NOT EXISTS idx_events_date         ON events(date);
 CREATE INDEX IF NOT EXISTS idx_listings_category   ON ebay_listings(category_id);
 CREATE INDEX IF NOT EXISTS idx_listings_item_id    ON ebay_listings(item_id);
+CREATE INDEX IF NOT EXISTS idx_brands_tier         ON ebay_brands(tier);
+CREATE INDEX IF NOT EXISTS idx_brand_models_brand  ON ebay_brand_models(brand_id);
 `;
 
 /**

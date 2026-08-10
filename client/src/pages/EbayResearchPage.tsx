@@ -21,8 +21,10 @@ import {
   SearchInput,
   StatCard,
   TableScroll,
+  Tabs,
   Toolbar,
 } from '../components/ui';
+import { BrandBook } from './ebay/BrandBook';
 import { useApi, useDebouncedValue } from '../hooks/useApi';
 import { useToast } from '../hooks/useToast';
 import { ApiError, api } from '../lib/api';
@@ -74,6 +76,7 @@ export function EbayResearchPage() {
   const [researchCategory, setResearchCategory] = useState('');
   const [researchQuery, setResearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
+  const [tab, setTab] = useState<'listings' | 'brands'>('listings');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [confirmClear, setConfirmClear] = useState(false);
   const search = useDebouncedValue(searchInput);
@@ -147,6 +150,21 @@ export function EbayResearchPage() {
   return (
     <>
       <PageIntro />
+
+      {/* Two views of the same subject: what sold, and what that taught us about
+          brands. Tabs rather than two pages because the brand book is only ever read
+          in the context of the listings behind it. */}
+      <Tabs
+        label="eBay research views"
+        value={tab}
+        onChange={setTab}
+        tabs={[
+          { id: 'listings', label: 'Sold Listings', count: listings.data?.length },
+          { id: 'brands', label: 'Brands' },
+        ]}
+      />
+
+      {tab === 'brands' ? <BrandBook /> : <>
 
       {/* Research bar: pick a category, then open eBay in a new tab. */}
       <section className="card mb-6 p-4">
@@ -380,6 +398,7 @@ export function EbayResearchPage() {
           </TableScroll>
         )}
       </div>
+      </>}
 
       <ConfirmDialog
         open={confirmClear}

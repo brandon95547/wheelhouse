@@ -264,3 +264,51 @@ export function StatCard({
     </div>
   );
 }
+
+/* ------------------------------------------------------------------- tabs */
+
+/**
+ * A tab bar for switching between views of the same subject.
+ *
+ * Real buttons in a `tablist`, not links: these swap a panel rather than navigate, and a
+ * screen reader needs to be told which is current. `aria-selected` carries that — a
+ * highlight alone is invisible to anyone not looking at it.
+ */
+export function Tabs<T extends string>({
+  value,
+  onChange,
+  tabs,
+  label,
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  tabs: Array<{ id: T; label: string; count?: number }>;
+  label: string;
+}) {
+  return (
+    <div role="tablist" aria-label={label} className="mb-6 flex gap-1 border-b border-outline-variant">
+      {tabs.map((tab) => {
+        const selected = tab.id === value;
+        return (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={selected}
+            className={`-mb-px cursor-pointer border-b-2 px-4 py-2.5 text-sm font-medium transition-colors ${
+              selected
+                ? 'border-primary text-primary-text'
+                : 'border-transparent text-on-surface-muted hover:border-outline hover:text-on-surface'
+            }`}
+            onClick={() => onChange(tab.id)}
+          >
+            {tab.label}
+            {tab.count !== undefined ? (
+              <span className="ml-1.5 text-xs text-on-surface-muted">{tab.count}</span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
