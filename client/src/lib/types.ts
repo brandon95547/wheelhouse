@@ -177,9 +177,12 @@ export interface AppInfo {
 
 export type OptionLists = Record<string, string[]>;
 
-/* The brand book. `rare` means the label alone is reason to inspect; `common` means
-   only certain models carry value; `unsorted` is what an import found that no guide has
-   judged yet. */
+/* The brand book, split by WHERE THE PICKUP SIGNAL LIVES. `rare` means the brand itself
+   is the signal — seeing the label is reason enough. `common` means the specific model
+   is the signal: the label is worthless by default and only certain models, lines,
+   materials, vintages, collaborations or editions pay, which is why a common brand
+   always carries a `look_for`. `unsorted` is what an import found that no guide has
+   judged — or judged common without being able to say what to look for. */
 export type BrandTier = 'rare' | 'common' | 'unsorted';
 export type ModelVerdict = 'worthy' | 'not_worthy';
 
@@ -201,6 +204,8 @@ export interface EbayBrand {
   name: string;
   tier: BrandTier;
   tier_source: string;
+  /** What to look for. Always set on a common brand; always null on a rare one. */
+  look_for: string | null;
   kind: string | null;
   sold_count: number;
   rejected_count: number;

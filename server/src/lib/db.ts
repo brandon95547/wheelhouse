@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS ebay_brands (
   median_price   REAL,
   high_price     REAL,
   price_samples  TEXT    NOT NULL DEFAULT '[]',
+  look_for       TEXT,
   notes          TEXT,
   first_seen     TEXT    NOT NULL,
   last_seen      TEXT    NOT NULL
@@ -271,8 +272,26 @@ export function slugify(group: string, name: string): string {
     .replace(/^-|-$/g, '');
 }
 
+/**
+ * Columns added after the first release. `CREATE TABLE IF NOT EXISTS` is a no-op on a
+ * database that already has the table, so a new column has to be added by hand — and
+ * added idempotently, because migrate() runs on every boot.
+ */
+const ADDED_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
+  // What to look for in a common brand. A common brand without it is not a buy signal,
+  // it is just a famous name, so the API refuses to file one as common while it is null.
+  ['ebay_brands', 'look_for', 'TEXT'],
+];
+
 export function migrate(): void {
   db.exec(SCHEMA);
+
+  for (const [table, column, ddl] of ADDED_COLUMNS) {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+    if (!columns.some((c) => c.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+    }
+  }
 
   const insertCategory = db.prepare(
     `INSERT INTO ebay_categories (slug, group_name, name, sort_order)

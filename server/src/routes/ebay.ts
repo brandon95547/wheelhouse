@@ -12,8 +12,10 @@ import {
 import {
   TIERS,
   VERDICTS,
+  cleanLookFor,
   listBrands,
   normaliseBrand,
+  resolveTier,
   upsertBrands,
 } from '../lib/brands.js';
 
@@ -237,13 +239,22 @@ router.post('/brands', (req, res) => {
     }) as never,
   );
 
+  // A guide brand that arrived without a description is reported, not hidden. Silence
+  // here would look identical to a scan that simply found nothing common.
+  const undescribed = result.undescribed + candidateResult.undescribed;
+
   res.status(201).json({
     saved: result.created + result.updated,
     created: result.created,
     updated: result.updated,
     models: result.models,
+    undescribed,
     candidates: candidateResult.created + candidateResult.updated,
-    message: `${result.created} new brand${result.created === 1 ? '' : 's'}, ${result.updated} updated, ${candidateResult.created} unsorted.`,
+    message:
+      `${result.created} new brand${result.created === 1 ? '' : 's'}, ${result.updated} updated, ${candidateResult.created} unsorted.` +
+      (undescribed
+        ? ` ${undescribed} left unsorted for want of a "Look for" description.`
+        : ''),
   });
 });
 
@@ -266,17 +277,45 @@ router.patch('/brands/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) throw badRequest('Invalid id');
 
+  const existing = db.prepare('SELECT * FROM ebay_brands WHERE id = ?').get(id) as
+    | { tier: string; look_for: string | null }
+    | undefined;
+  if (!existing) throw notFound('No brand with that id');
+
   const body = (req.body ?? {}) as Record<string, unknown>;
   const sets: string[] = [];
   const params: Record<string, unknown> = { id };
 
-  if (body.tier !== undefined) {
-    const tier = String(body.tier);
+  // Tier and description are one decision, so they are validated as one even when the
+  // request only mentions the tier — the row may already carry a usable description.
+  const wantsTier = body.tier !== undefined;
+  const wantsLookFor = body.look_for !== undefined;
+
+  if (wantsTier || wantsLookFor) {
+    const tier = wantsTier ? String(body.tier) : existing.tier;
     if (!TIERS.includes(tier as never)) {
       throw badRequest(`tier must be one of: ${TIERS.join(', ')}`);
     }
-    sets.push('tier = @tier', "tier_source = 'manual'");
-    params.tier = tier;
+
+    const supplied = wantsLookFor ? cleanLookFor(body.look_for) : cleanLookFor(existing.look_for);
+    const resolved = resolveTier(tier as never, supplied);
+
+    // Refuse rather than silently file it elsewhere. A PATCH is someone stating a
+    // judgement, and quietly downgrading it would leave them believing the opposite.
+    if (tier === 'common' && resolved.tier !== 'common') {
+      throw badRequest('Validation failed', [
+        {
+          field: 'look_for',
+          message:
+            'A common brand needs a "Look for" description naming the models, lines, materials, vintages, collaborations or editions worth buying. Without one, leave it unsorted.',
+        },
+      ]);
+    }
+
+    sets.push('tier = @tier', 'look_for = @look_for');
+    params.tier = resolved.tier;
+    params.look_for = resolved.look_for;
+    if (wantsTier) sets.push("tier_source = 'manual'");
   }
   if (body.notes !== undefined) {
     sets.push('notes = @notes');

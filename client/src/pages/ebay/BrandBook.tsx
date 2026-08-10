@@ -1,14 +1,21 @@
 /**
  * The brand book — what to look for, built from what has actually sold.
  *
- * Two groups, in the language of the trade:
+ * Two groups, split by WHERE THE PICKUP SIGNAL LIVES:
  *
- *   Rare    the label alone is reason to inspect. You will not see many.
- *   Common  the label is everywhere; only certain models carry value.
+ *   Rare    the brand itself is the signal. Seeing the label is reason enough to pick
+ *           the item up, so the row is just a name. You will not see many.
+ *   Common  the specific model is the signal. The label is everywhere and worthless by
+ *           default, so the row is USELESS WITHOUT ITS "Look for" LINE — that line is
+ *           the actual content, and the brand name is only its heading.
  *
  * plus Unsorted, for brands an import turned up that no guide has judged. Those are not
  * noise — a brand selling repeatedly that nobody has classified is the most useful thing
  * a scan can surface — but they are kept apart so they never read as endorsed.
+ *
+ * That is why promoting a brand to Common opens a description field instead of moving it:
+ * a Common row with nothing to look for tells someone standing in a thrift store that
+ * every Nike on the rack is worth money, which is worse than telling them nothing.
  *
  * ALPHABETICAL, NOT BY VALUE. This is a reference you consult while holding a shoe in a
  * thrift store, and the only order that helps then is the one your eye can scan.
@@ -34,21 +41,22 @@ const GROUPS: Array<{
   {
     tier: 'rare',
     title: 'Rare',
-    blurb: 'The label alone is reason to inspect. Pick these up on sight.',
+    blurb:
+      'The brand itself is the pickup signal. Grab these on sight — no model, material or edition needs to be true.',
     icon: Gem,
   },
   {
     tier: 'common',
     title: 'Common',
     blurb:
-      'Everyone finds these. Only the models listed below are worth the money — anything struck through is not.',
+      'Not worth picking up on the label alone. Read the "Look for" line — only what it names is worth the money, and anything struck through is not.',
     icon: Store,
   },
   {
     tier: 'unsorted',
     title: 'Unsorted',
     blurb:
-      'Turned up in an import, not yet judged. Move each one to Rare or Common, or delete it.',
+      'Turned up in an import, not yet judged — or judged common with nothing specific to look for. Move each one to Rare or Common, or delete it.',
     icon: AlertTriangle,
   },
 ];
@@ -73,13 +81,16 @@ function brandBookText(book: EbayBrandBook): string {
 
     for (const brand of brands) {
       lines.push(brand.name);
+      // The "Look for" line is the whole point of a common row, so it leads — a printed
+      // list of bare common brand names would be actively misleading in an aisle.
+      if (brand.look_for) lines.push(`    Look for: ${brand.look_for}`);
       if (brand.notes) lines.push(`    ${brand.notes}`);
       // Only common brands turn on the model, so only they carry a model list.
       if (tier === 'common') {
         const worthy = brand.models.filter((m) => m.verdict === 'worthy');
         const skip = brand.models.filter((m) => m.verdict === 'not_worthy');
-        if (worthy.length) lines.push(`    WORTH IT: ${worthy.map((m) => m.name).join(', ')}`);
-        if (skip.length) lines.push(`    SKIP:     ${skip.map((m) => m.name).join(', ')}`);
+        if (worthy.length) lines.push(`    Seen selling: ${worthy.map((m) => m.name).join(', ')}`);
+        if (skip.length) lines.push(`    Skip:         ${skip.map((m) => m.name).join(', ')}`);
       }
     }
   }
@@ -100,13 +111,28 @@ export function BrandBook() {
     return map;
   }, [book.data]);
 
-  async function moveTier(brand: EbayBrand, tier: BrandTier) {
+  /* `lookFor` travels WITH the tier in one request, so the server never sees a moment
+     where the brand is common and undescribed — even a transient one. */
+  async function moveTier(brand: EbayBrand, tier: BrandTier, lookFor?: string) {
     try {
-      await api.patch(`/ebay/brands/${brand.id}`, { tier });
+      await api.patch(`/ebay/brands/${brand.id}`, {
+        tier,
+        ...(lookFor === undefined ? {} : { look_for: lookFor }),
+      });
       toast.success(`${brand.name} moved to ${tier}.`);
       book.reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not move that brand.');
+    }
+  }
+
+  async function setLookFor(brand: EbayBrand, lookFor: string) {
+    try {
+      await api.patch(`/ebay/brands/${brand.id}`, { look_for: lookFor });
+      toast.success(`Updated what to look for under ${brand.name}.`);
+      book.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not save that description.');
     }
   }
 
@@ -218,6 +244,7 @@ export function BrandBook() {
                   key={brand.id}
                   brand={brand}
                   onMove={moveTier}
+                  onLookFor={setLookFor}
                   onVerdict={setVerdict}
                   onAddExclusion={addExclusion}
                   onRemove={remove}
@@ -231,21 +258,30 @@ export function BrandBook() {
   );
 }
 
+const LOOK_FOR_PLACEHOLDER =
+  'e.g. Jordan, SB Dunk, Kobe, Foamposite, desirable Air Max, ACG and collaborations';
+
 function BrandRow({
   brand,
   onMove,
+  onLookFor,
   onVerdict,
   onAddExclusion,
   onRemove,
 }: {
   brand: EbayBrand;
-  onMove: (brand: EbayBrand, tier: BrandTier) => void;
+  onMove: (brand: EbayBrand, tier: BrandTier, lookFor?: string) => void;
+  onLookFor: (brand: EbayBrand, lookFor: string) => void;
   onVerdict: (brand: EbayBrand, modelId: number, verdict: ModelVerdict) => void;
   onAddExclusion: (brand: EbayBrand, name: string) => void;
   onRemove: (brand: EbayBrand) => void;
 }) {
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
+  // Set while the row is asking what to look for. 'promote' also carries the tier move;
+  // 'edit' only rewrites the description of a brand already common.
+  const [asking, setAsking] = useState<'promote' | 'edit' | null>(null);
+  const [lookForDraft, setLookForDraft] = useState('');
 
   // Exclusions first: they are the surprising information, and the reason to read a
   // common brand's row at all.
@@ -266,7 +302,17 @@ function BrandRow({
                 key={tier}
                 type="button"
                 className="btn btn-ghost btn-sm"
-                onClick={() => onMove(brand, tier)}
+                onClick={() => {
+                  // Becoming common means saying what to look for. If the brand already
+                  // arrived with a description the move is still one click; if not, the
+                  // row asks rather than filing an empty endorsement.
+                  if (tier === 'common' && !brand.look_for) {
+                    setLookForDraft('');
+                    setAsking('promote');
+                    return;
+                  }
+                  onMove(brand, tier);
+                }}
               >
                 → {tier}
               </button>
@@ -281,6 +327,74 @@ function BrandRow({
           </button>
         </div>
       </div>
+
+      {/* The "Look for" line. On a common brand this is the row's actual content — the
+          brand name above it is only a heading — so it is rendered as body text, not as
+          the muted afterthought that notes get. */}
+      {asking ? (
+        <form
+          className="mt-2 flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const value = lookForDraft.trim();
+            if (value.length < 3) return;
+            if (asking === 'promote') onMove(brand, 'common', value);
+            else onLookFor(brand, value);
+            setAsking(null);
+          }}
+        >
+          <label className="text-xs font-medium text-on-surface" htmlFor={`look-for-${brand.id}`}>
+            Look for:
+          </label>
+          <input
+            autoFocus
+            id={`look-for-${brand.id}`}
+            className="input h-8 min-w-0 flex-1 py-0 text-xs"
+            value={lookForDraft}
+            placeholder={LOOK_FOR_PLACEHOLDER}
+            onChange={(event) => setLookForDraft(event.target.value)}
+            onKeyDown={(event) => event.key === 'Escape' && setAsking(null)}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={lookForDraft.trim().length < 3}>
+            {asking === 'promote' ? 'Make common' : 'Save'}
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAsking(null)}>
+            Cancel
+          </button>
+        </form>
+      ) : brand.look_for ? (
+        <p className="mt-1 text-sm text-on-surface-variant">
+          <span className="font-medium text-on-surface">Look for:</span> {brand.look_for}{' '}
+          <button
+            type="button"
+            className="link text-xs"
+            onClick={() => {
+              setLookForDraft(brand.look_for ?? '');
+              setAsking('edit');
+            }}
+          >
+            edit
+          </button>
+        </p>
+      ) : brand.tier === 'common' ? (
+        // Should be unreachable — the API refuses to file an undescribed common brand —
+        // but a row that lies by omission is exactly what this page exists to prevent,
+        // so it says so out loud rather than rendering a bare, endorsing brand name.
+        <p className="mt-1 flex items-center gap-1.5 text-sm text-danger-text">
+          <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+          No description — this row does not say what to look for.
+          <button
+            type="button"
+            className="link"
+            onClick={() => {
+              setLookForDraft('');
+              setAsking('edit');
+            }}
+          >
+            Add one
+          </button>
+        </p>
+      ) : null}
 
       {brand.notes ? <p className="mt-1 text-xs text-on-surface-variant">{brand.notes}</p> : null}
 
