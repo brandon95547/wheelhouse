@@ -214,9 +214,30 @@ export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
     if (TIER_RANK[verdict.tier] > TIER_RANK[existing.tier]) existing.tier = verdict.tier;
   }
 
+  /* Fold "Brand + model" rows into the brand.
+   *
+   * A model returned as though it were a brand — "Brooks Ghost Max" beside "Brooks",
+   * "Danner 2650" beside "Danner" — would otherwise become a second row competing with the
+   * real one. When one slug begins with another at a word boundary, the longer is the
+   * shorter plus a model: its models are absorbed and the row is dropped. */
+  const slugs = [...bySlug.keys()].sort((a, b) => a.length - b.length);
+  for (const longer of [...slugs].reverse()) {
+    const parent = slugs.find((s) => s !== longer && longer.startsWith(`${s} `));
+    if (!parent) continue;
+
+    const child = bySlug.get(longer)!;
+    const owner = bySlug.get(parent)!;
+    // The tail of the child's name IS the model, and so is anything it listed.
+    owner.modelSet.add(child.name.slice(child.name.length - (longer.length - parent.length) + 1).trim());
+    for (const model of child.modelSet) owner.modelSet.add(model);
+    if (!owner.lookFor && child.lookFor) owner.lookFor = child.lookFor;
+    if (TIER_RANK[child.tier] > TIER_RANK[owner.tier]) owner.tier = child.tier;
+    bySlug.delete(longer);
+  }
+
   return [...bySlug.values()].map(({ modelSet, ...rest }) => ({
     ...rest,
-    models: [...modelSet],
+    models: [...modelSet].filter((m) => m.length >= 2).slice(0, 20),
   }));
 }
 

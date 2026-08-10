@@ -57,7 +57,12 @@ export function normaliseBrand(value: unknown): string {
     .replace(/['’`]/g, '')             // Church's -> churchs
     .replace(/&/g, ' and ')
     .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
+    .trim()
+    /* Join runs of single letters, so an initialism written either way lands on one
+       slug: "L.L. Bean" and "LL Bean" both become "ll bean", "A. Testoni" and
+       "A Testoni" both become "atestoni". Without this the book grows a second row for
+       every brand whose punctuation a seller omitted. */
+    .replace(/\b(?:[a-z0-9] )+[a-z0-9]\b/g, (run) => run.replace(/ /g, ''));
 }
 
 /** The extension speaks master/exception; the book speaks rare/common. */

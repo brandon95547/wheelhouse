@@ -23,7 +23,7 @@
 import { db } from './db.js';
 import { classifyListings } from './brand-ai.js';
 import { applyAiVerdicts } from './brand-analysis.js';
-import { aiConfigured } from './deepseek.js';
+import { aiConfigured } from './llm.js';
 
 export interface ClassifyStatus {
   running: boolean;
@@ -77,7 +77,7 @@ export async function runClassification(categoryId?: number): Promise<ClassifySt
   };
 
   try {
-    if (!aiConfigured()) throw new Error('DEEPSEEK_API_KEY is not set');
+    if (!aiConfigured()) throw new Error('OPENAI_API_KEY is not set');
     if (!listings.length) throw new Error('No listings with a sold price to classify');
 
     const verdicts = await classifyListings(listings);

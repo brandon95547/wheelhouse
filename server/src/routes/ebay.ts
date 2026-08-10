@@ -20,7 +20,7 @@ import {
 } from '../lib/brands.js';
 import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
 import { classifyStatus, startClassification } from '../lib/classify-job.js';
-import { aiConfigured } from '../lib/deepseek.js';
+import { aiConfigured } from '../lib/llm.js';
 import { MIN_SAMPLE, RARE_GATES } from '../lib/brand-strength.js';
 
 const router: Router = Router();
@@ -323,7 +323,7 @@ router.get('/brands/analysis', (_req, res) => {
 router.post('/brands/classify', (req, res) => {
   if (!aiConfigured()) {
     throw badRequest('Validation failed', [
-      { field: 'ai', message: 'DEEPSEEK_API_KEY is not set, so brands cannot be classified.' },
+      { field: 'ai', message: 'OPENAI_API_KEY is not set, so brands cannot be classified.' },
     ]);
   }
 
