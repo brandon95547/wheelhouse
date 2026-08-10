@@ -25,7 +25,7 @@
  * cost of a wrong row is a missed pickup or a wasted one.
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, Download, Gem, Plus, Search, Store, X } from 'lucide-react';
+import { AlertTriangle, Check, Download, Gem, Lock, LockOpen, Plus, Search, Store, X } from 'lucide-react';
 import { EmptyState, ErrorState, LoadingState, SearchInput } from '../../components/ui';
 import { useApi, useDebouncedValue } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
@@ -123,6 +123,19 @@ export function BrandBook() {
       book.reload();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not move that brand.');
+    }
+  }
+
+  /* The pin. Everything else on this page is a judgement that a later scan may revise;
+     this is the one that says "stop revising it". */
+  async function toggleLock(brand: EbayBrand) {
+    const next = brand.locked ? 0 : 1;
+    try {
+      await api.patch(`/ebay/brands/${brand.id}`, { locked: next });
+      toast.success(next ? `${brand.name} locked.` : `${brand.name} unlocked.`);
+      book.reload();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not change the lock.');
     }
   }
 
@@ -244,6 +257,7 @@ export function BrandBook() {
                   key={brand.id}
                   brand={brand}
                   onMove={moveTier}
+                  onLock={toggleLock}
                   onLookFor={setLookFor}
                   onVerdict={setVerdict}
                   onAddExclusion={addExclusion}
@@ -264,6 +278,7 @@ const LOOK_FOR_PLACEHOLDER =
 function BrandRow({
   brand,
   onMove,
+  onLock,
   onLookFor,
   onVerdict,
   onAddExclusion,
@@ -271,6 +286,7 @@ function BrandRow({
 }: {
   brand: EbayBrand;
   onMove: (brand: EbayBrand, tier: BrandTier, lookFor?: string) => void;
+  onLock: (brand: EbayBrand) => void;
   onLookFor: (brand: EbayBrand, lookFor: string) => void;
   onVerdict: (brand: EbayBrand, modelId: number, verdict: ModelVerdict) => void;
   onAddExclusion: (brand: EbayBrand, name: string) => void;
@@ -294,8 +310,17 @@ function BrandRow({
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-semibold text-on-surface">{brand.name}</span>
 
+        {brand.locked ? (
+          <span className="inline-flex items-center gap-1 rounded bg-surface-container px-1.5 py-0.5 text-xs text-on-surface-muted ring-1 ring-inset ring-outline">
+            <Lock className="size-3" aria-hidden="true" />
+            locked
+          </span>
+        ) : null}
+
         <div className="ml-auto flex items-center gap-1">
-          {(['rare', 'common', 'unsorted'] as BrandTier[])
+          {/* Hidden rather than disabled while locked: a row of dead buttons invites the
+              click that then does nothing, which reads as a bug rather than a pin. */}
+          {(brand.locked ? [] : (['rare', 'common', 'unsorted'] as BrandTier[]))
             .filter((tier) => tier !== brand.tier)
             .map((tier) => (
               <button
@@ -319,12 +344,32 @@ function BrandRow({
             ))}
           <button
             type="button"
-            className="btn btn-ghost btn-sm text-danger-text"
-            onClick={() => onRemove(brand)}
-            aria-label={`Remove ${brand.name}`}
+            className={`btn btn-ghost btn-sm ${brand.locked ? 'text-on-surface' : ''}`}
+            onClick={() => onLock(brand)}
+            aria-pressed={Boolean(brand.locked)}
+            aria-label={brand.locked ? `Unlock ${brand.name}` : `Lock ${brand.name}`}
+            title={
+              brand.locked
+                ? 'Locked — re-scoring skips it and it cannot be deleted. Click to unlock.'
+                : 'Lock this brand so re-scoring and deletion leave it alone'
+            }
           >
-            <X className="size-3.5" aria-hidden="true" />
+            {brand.locked ? (
+              <Lock className="size-3.5" aria-hidden="true" />
+            ) : (
+              <LockOpen className="size-3.5" aria-hidden="true" />
+            )}
           </button>
+          {!brand.locked ? (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm text-danger-text"
+              onClick={() => onRemove(brand)}
+              aria-label={`Remove ${brand.name}`}
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </button>
+          ) : null}
         </div>
       </div>
 

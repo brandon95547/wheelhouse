@@ -206,6 +206,8 @@ export interface EbayBrand {
   tier_source: string;
   /** What to look for. Always set on a common brand; always null on a rare one. */
   look_for: string | null;
+  /** Pinned by the user: re-scoring skips it and deletion refuses it. */
+  locked: number;
   kind: string | null;
   sold_count: number;
   rejected_count: number;
@@ -220,4 +222,50 @@ export interface EbayBrand {
 export interface EbayBrandBook {
   brands: EbayBrand[];
   counts: { rare: number; common: number; unsorted: number };
+}
+
+/* What the sold-price evidence says about a brand. Rank statistics only — see
+   server/src/lib/brand-strength.ts for why the mean is never used. */
+export interface BrandStats {
+  sampleSize: number;
+  median: number | null;
+  lowerQuartile: number | null;
+  topDecile: number | null;
+  shareAt: Record<'40' | '50' | '60' | '100', number>;
+  strength: 'rare' | 'common' | 'weak' | 'thin';
+  confident: boolean;
+  reason: string;
+}
+
+export interface MinedModel {
+  name: string;
+  hits: number;
+  coverage: number;
+  lift: number;
+  medianPrice: number | null;
+}
+
+export interface BrandProposal {
+  brandId: number;
+  name: string;
+  currentTier: BrandTier;
+  proposedTier: BrandTier;
+  changed: boolean;
+  locked: boolean;
+  stats: BrandStats;
+  models: MinedModel[];
+  lookFor: string | null;
+}
+
+export interface BrandAnalysis {
+  gates: {
+    rare: {
+      medianAtLeast: number;
+      lowerQuartileAtLeast: number;
+      shareAtLeast: { price: number; fraction: number };
+    };
+    minSample: number;
+  };
+  proposals: BrandProposal[];
+  counts: { rare: number; common: number; unsorted: number; changed: number; locked: number };
 }

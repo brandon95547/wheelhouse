@@ -25,6 +25,7 @@ import {
   Toolbar,
 } from '../components/ui';
 import { BrandBook } from './ebay/BrandBook';
+import { BrandReport } from './ebay/BrandReport';
 import { useApi, useDebouncedValue } from '../hooks/useApi';
 import { useToast } from '../hooks/useToast';
 import { ApiError, api } from '../lib/api';
@@ -76,7 +77,7 @@ export function EbayResearchPage() {
   const [researchCategory, setResearchCategory] = useState('');
   const [researchQuery, setResearchQuery] = useState('');
   const [searchInput, setSearchInput] = useState('');
-  const [tab, setTab] = useState<'listings' | 'brands'>('listings');
+  const [tab, setTab] = useState<'listings' | 'brands' | 'report'>('listings');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [confirmClear, setConfirmClear] = useState(false);
   const search = useDebouncedValue(searchInput);
@@ -161,10 +162,11 @@ export function EbayResearchPage() {
         tabs={[
           { id: 'listings', label: 'Sold Listings', count: listings.data?.length },
           { id: 'brands', label: 'Brands' },
+          { id: 'report', label: 'Report' },
         ]}
       />
 
-      {tab === 'brands' ? <BrandBook /> : <>
+      {tab === 'report' ? <BrandReport /> : tab === 'brands' ? <BrandBook /> : <>
 
       {/* Research bar: pick a category, then open eBay in a new tab. */}
       <section className="card mb-6 p-4">

@@ -163,6 +163,7 @@ CREATE TABLE IF NOT EXISTS ebay_brands (
   high_price     REAL,
   price_samples  TEXT    NOT NULL DEFAULT '[]',
   look_for       TEXT,
+  locked         INTEGER NOT NULL DEFAULT 0,
   notes          TEXT,
   first_seen     TEXT    NOT NULL,
   last_seen      TEXT    NOT NULL
@@ -281,6 +282,10 @@ const ADDED_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   // What to look for in a common brand. A common brand without it is not a buy signal,
   // it is just a famous name, so the API refuses to file one as common while it is null.
   ['ebay_brands', 'look_for', 'TEXT'],
+  // A brand the user has pinned. Re-scoring skips it and deletion refuses it. Distinct
+  // from tier_source='manual', which only records who last set the tier: a locked brand
+  // is a standing instruction to leave this row alone, and it outranks the evidence.
+  ['ebay_brands', 'locked', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 export function migrate(): void {

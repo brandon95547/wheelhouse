@@ -18,6 +18,8 @@ import {
   resolveTier,
   upsertBrands,
 } from '../lib/brands.js';
+import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
+import { MIN_SAMPLE, RARE_GATES } from '../lib/brand-strength.js';
 
 const router: Router = Router();
 
@@ -194,16 +196,24 @@ router.post('/import', (req, res) => {
 
   const duplicates = valid.length - imported + duplicatesInBatch;
 
+  // New sales are new evidence, so the tiers are recomputed here rather than waiting for
+  // someone to ask. Manual judgements are untouched — see applyProposals.
+  const rescored = imported > 0 ? applyProposals(analyseBrands()) : { applied: 0, skipped: 0 };
+
   res.status(201).json({
     found: rawListings.length,
     imported,
     duplicates,
     failed: failed.length,
     errors: failed.slice(0, 25),
+    retiered: rescored.applied,
     category: { slug: category.slug, name: category.name, group: category.group_name },
     message:
       imported > 0
-        ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.`
+        ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.` +
+          (rescored.applied
+            ? ` ${rescored.applied} brand${rescored.applied === 1 ? '' : 's'} re-tiered on the new sales.`
+            : '')
         : 'No new listings were imported.',
   });
 });
@@ -258,6 +268,37 @@ router.post('/brands', (req, res) => {
   });
 });
 
+/**
+ * What the sales say about every brand, and what tier that implies.
+ *
+ * Read-only. The evidence is exposed separately from the act of applying it so a tier
+ * can always be interrogated — "why is this rare" has an answer with numbers in it.
+ */
+router.get('/brands/analysis', (_req, res) => {
+  const proposals = analyseBrands();
+  res.json({
+    gates: { rare: RARE_GATES, minSample: MIN_SAMPLE },
+    proposals,
+    counts: {
+      rare: proposals.filter((p) => p.proposedTier === 'rare').length,
+      common: proposals.filter((p) => p.proposedTier === 'common').length,
+      unsorted: proposals.filter((p) => p.proposedTier === 'unsorted').length,
+      changed: proposals.filter((p) => p.changed && !p.locked).length,
+      locked: proposals.filter((p) => p.locked).length,
+    },
+  });
+});
+
+/** Re-score every brand and write the tiers the evidence supports. */
+router.post('/brands/rescore', (_req, res) => {
+  const proposals = analyseBrands();
+  const result = applyProposals(proposals);
+  res.json({
+    ...result,
+    message: `${result.applied} brand${result.applied === 1 ? '' : 's'} re-tiered from sold-price evidence.`,
+  });
+});
+
 router.get('/brands', (req, res) => {
   const tier = typeof req.query.tier === 'string' ? req.query.tier : undefined;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
@@ -278,13 +319,29 @@ router.patch('/brands/:id', (req, res) => {
   if (!Number.isInteger(id) || id <= 0) throw badRequest('Invalid id');
 
   const existing = db.prepare('SELECT * FROM ebay_brands WHERE id = ?').get(id) as
-    | { tier: string; look_for: string | null }
+    | { tier: string; look_for: string | null; locked: number }
     | undefined;
   if (!existing) throw notFound('No brand with that id');
 
   const body = (req.body ?? {}) as Record<string, unknown>;
   const sets: string[] = [];
   const params: Record<string, unknown> = { id };
+
+  // The lock is set and cleared here, and it is the one field a locked brand still
+  // accepts — otherwise unlocking would require deleting the row it protects.
+  if (body.locked !== undefined) {
+    sets.push('locked = @locked');
+    params.locked = body.locked ? 1 : 0;
+  }
+
+  // A pinned brand refuses every other edit. The point of the pin is that nothing
+  // changes this row, and "nothing" has to include a hand slip as well as a re-score.
+  const unlocking = body.locked !== undefined && !body.locked;
+  if (existing.locked === 1 && !unlocking && Object.keys(body).some((k) => k !== 'locked')) {
+    throw badRequest('Validation failed', [
+      { field: 'locked', message: `${'This brand is locked'}. Unlock it before changing its tier, description or name.` },
+    ]);
+  }
 
   // Tier and description are one decision, so they are validated as one even when the
   // request only mentions the tier — the row may already carry a usable description.
@@ -338,8 +395,18 @@ router.patch('/brands/:id', (req, res) => {
 router.delete('/brands/:id', (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) throw badRequest('Invalid id');
-  const info = db.prepare('DELETE FROM ebay_brands WHERE id = ?').run(id);
-  if (!info.changes) throw notFound('No brand with that id');
+
+  const brand = db.prepare('SELECT name, locked FROM ebay_brands WHERE id = ?').get(id) as
+    | { name: string; locked: number }
+    | undefined;
+  if (!brand) throw notFound('No brand with that id');
+  if (brand.locked === 1) {
+    throw badRequest('Validation failed', [
+      { field: 'locked', message: `${brand.name} is locked. Unlock it first if you really want it gone.` },
+    ]);
+  }
+
+  db.prepare('DELETE FROM ebay_brands WHERE id = ?').run(id);
   res.json({ deleted: id });
 });
 
