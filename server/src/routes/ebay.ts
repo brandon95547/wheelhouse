@@ -16,7 +16,6 @@ import {
   listBrands,
   normaliseBrand,
   resolveTier,
-  upsertBrands,
 } from '../lib/brands.js';
 import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
 import { classifyStatus, startClassification } from '../lib/classify-job.js';
@@ -242,53 +241,20 @@ router.post('/import', (req, res) => {
 
 /* ------------------------------------------------------------------- brands */
 
-/**
- * Receives a scan's brand rollup from the Lookout extension.
+/* THE BRAND BOOK HAS ONE AUTHOR: the classifier.
  *
- * A brand already in the book KEEPS ITS TIER. Once a human has judged a brand — or
- * corrected a judgement — a later import must not quietly overwrite it, or every
- * correction would last exactly until the next scan.
+ * There was a POST /brands here that accepted a brand rollup from outside. It is gone,
+ * and nothing should put it back. Two things arrived through it that are not brands:
+ * colour names, because the caller read every refinement list on the page rather than
+ * the Brand one, and the leading words of unmatched titles — "air", "nike air",
+ * "jordan retro" — which are fragments of a model, not a label anyone sources by.
+ *
+ * Both outran the classifier by twenty seconds and filled the book before it answered.
+ * A door that lets an outside guesser write brands cannot be made safe by validating
+ * harder at the threshold, because the caller cannot tell a brand from a colour in the
+ * first place. So the door is closed: brands come from the AI verdicts, and from the
+ * hand corrections a person makes afterwards. Nothing else writes here.
  */
-router.post('/brands', (req, res) => {
-  const body = (req.body ?? {}) as Record<string, unknown>;
-  const brands = body.brands;
-  if (!Array.isArray(brands)) {
-    throw badRequest('Validation failed', [
-      { field: 'brands', message: 'brands must be an array' },
-    ]);
-  }
-
-  const result = upsertBrands(brands as never);
-
-  // Candidates are brands no guide covers. They land as `unsorted` rather than being
-  // dropped: a brand selling repeatedly that nobody has classified is the most useful
-  // thing a scan can surface, and it needs somewhere to sit until it is judged.
-  const candidates = Array.isArray(body.candidates) ? body.candidates : [];
-  const candidateResult = upsertBrands(
-    candidates.map((c) => {
-      const row = (c ?? {}) as Record<string, unknown>;
-      return { brand: row.name, soldCount: row.count, medianPrice: row.medianPrice };
-    }) as never,
-  );
-
-  // A guide brand that arrived without a description is reported, not hidden. Silence
-  // here would look identical to a scan that simply found nothing common.
-  const undescribed = result.undescribed + candidateResult.undescribed;
-
-  res.status(201).json({
-    saved: result.created + result.updated,
-    created: result.created,
-    updated: result.updated,
-    models: result.models,
-    undescribed,
-    candidates: candidateResult.created + candidateResult.updated,
-    message:
-      `${result.created} new brand${result.created === 1 ? '' : 's'}, ${result.updated} updated, ${candidateResult.created} unsorted.` +
-      (undescribed
-        ? ` ${undescribed} left unsorted for want of a "Look for" description.`
-        : ''),
-  });
-});
 
 /**
  * What the sales say about every brand, and what tier that implies.

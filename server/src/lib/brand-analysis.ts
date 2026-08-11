@@ -17,7 +17,7 @@
  * last exactly until the next scan.
  */
 import { db } from './db.js';
-import { normaliseBrand, resolveTier } from './brands.js';
+import { MAX_PRICE_SAMPLES, median, normaliseBrand, resolveTier } from './brands.js';
 import { nowIso } from './crud.js';
 import { scoreBrand, type BrandStats } from './brand-strength.js';
 import { lookForFromModels, mineModels, type MinedModel } from './model-mining.js';
@@ -241,6 +241,47 @@ export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
   }));
 }
 
+/**
+ * Recompute every brand's sales figures from the listings themselves.
+ *
+ * These numbers used to arrive from outside, alongside brands that were not brands. With
+ * that door closed they have to be derived, and deriving them is the better answer
+ * anyway: the listings are the evidence, so a count that disagrees with them was wrong.
+ *
+ * Recomputed rather than accumulated, which matters after a re-run — adding to the old
+ * total would double every brand each time the book was rebuilt. A brand no listing
+ * matches is zeroed rather than left holding a stale figure; the AI names brands it knows
+ * from the resale market, and some of those legitimately have no sale in this scan.
+ */
+export function refreshBrandStats(): number {
+  const grouped = listingsByBrand();
+  const update = db.prepare(
+    `UPDATE ebay_brands
+        SET sold_count = @sold_count, median_price = @median_price,
+            high_price = @high_price, price_samples = @price_samples
+      WHERE id = @id`,
+  );
+
+  let touched = 0;
+  db.transaction(() => {
+    const brands = db.prepare('SELECT id FROM ebay_brands').all() as Array<{ id: number }>;
+    for (const brand of brands) {
+      const prices = (grouped.get(brand.id) ?? [])
+        .map((l) => l.sold_price)
+        .filter((p): p is number => typeof p === 'number' && Number.isFinite(p));
+      update.run({
+        id: brand.id,
+        sold_count: prices.length,
+        median_price: median(prices),
+        high_price: prices.length ? Math.max(...prices) : null,
+        price_samples: JSON.stringify(prices.slice(-MAX_PRICE_SAMPLES)),
+      });
+      touched += 1;
+    }
+  })();
+  return touched;
+}
+
 export function applyAiVerdicts(
   incoming: AiVerdictInput[],
 ): { applied: number; skipped: number; created: number; models: number } {
@@ -313,6 +354,10 @@ export function applyAiVerdicts(
       } else skipped += 1;
     }
   })();
+
+  // After the names are settled, not before — a brand created in this pass has no id to
+  // attribute listings to until its row exists.
+  refreshBrandStats();
 
   return { applied, skipped, created, models: modelsWritten };
 }
