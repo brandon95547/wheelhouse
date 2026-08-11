@@ -21,7 +21,7 @@ import { MAX_PRICE_SAMPLES, median, normaliseBrand, resolveTier } from './brands
 import { nowIso } from './crud.js';
 import { scoreBrand, type BrandStats } from './brand-strength.js';
 import { lookForFromModels, mineModels, type MinedModel } from './model-mining.js';
-import type { AiReading } from './brand-ai.js';
+import type { BrandReading } from './brand-paste.js';
 
 interface ListingRow {
   id: number;
@@ -62,8 +62,8 @@ export interface BrandProposal {
  * Both sides run through the same normaliser the slug uses, so "Dr. Martens" matches
  * "Dr Martens" and "Church's" matches "Churchs" without a special case for either.
  */
-function titleMatcher(brands: BrandRow[]): (title: string) => BrandRow | null {
-  const prepared = brands
+function titleMatcher<T extends { name: string }>(entries: T[]): (title: string) => T | null {
+  const prepared = entries
     .map((brand) => ({ brand, words: normaliseBrand(brand.name).split(' ').filter(Boolean) }))
     .filter((entry) => entry.words.length > 0)
     // Longest first: the most specific brand name that fits should win.
@@ -107,13 +107,14 @@ export function listingsByBrand(categoryId?: number): Map<number, ListingRow[]> 
 
   /* Two sources, in this order of trust:
    *
-   *   brand_id     what the classifier decided this listing IS, stored at import. Exact.
-   *   title match  the fallback, for listings imported before attribution existed or while
-   *                the API was down. It guesses from words in a title, which is why it is
-   *                only consulted when nothing better is on the row.
+   *   brand_id     what this listing was identified as, stored by the last attribution
+   *                pass or by a paste that named it directly. Exact.
+   *   title match  the fallback, for listings imported since that pass ran. It guesses from
+   *                words in a title, which is why it is only consulted second.
    *
-   * Without the fallback a book would read as empty the moment the AI was unavailable,
-   * which is the failure this whole module is built to avoid. */
+   * The fallback also covers a stored brand_id pointing at a brand that has since been
+   * deleted: without it those sales would vanish from every figure in the book until
+   * something happened to re-attribute them. */
   const known = new Set(brands.map((b) => b.id));
   const match = titleMatcher(brands);
   const grouped = new Map<number, ListingRow[]>();
@@ -122,9 +123,7 @@ export function listingsByBrand(categoryId?: number): Map<number, ListingRow[]> 
     const brandId =
       listing.brand_id !== null && known.has(listing.brand_id)
         ? listing.brand_id
-        : listing.brand_id === null
-          ? (match(listing.title)?.id ?? null)
-          : null;
+        : (match(listing.title)?.id ?? null);
     if (brandId === null) continue;
     const list = grouped.get(brandId) ?? [];
     list.push(listing);
@@ -190,100 +189,18 @@ export function analyseBrands(categoryId?: number): BrandProposal[] {
   });
 }
 
-/**
- * Fold DeepSeek's verdicts into the book.
+/* THERE IS NO LONGER A VERDICT MERGER HERE, and that is a deletion worth explaining.
  *
- * The model decides the tier because it can see what the arithmetic cannot: that a
- * brand's good sales all say "1460 Made in England" and its bad ones do not. The
- * arithmetic is still what it was shown, so the two are looking at the same evidence.
+ * `mergeVerdicts` collapsed rows the classifier returned twice and folded "Brooks Ghost Max"
+ * into "Brooks" on the theory that a slug beginning with another slug is a model wearing a
+ * brand's name. Both rules were defences against a small model, and both are wrong now that
+ * a person writes the input: two rows for one brand is a contradiction its author should be
+ * told about rather than have silently averaged, and "Nike Golf" beside "Nike" is a
+ * deliberate second row, not a mistake to absorb.
  *
- * Locked and hand-judged brands are skipped here exactly as they are in applyProposals —
- * a paid API is still not allowed to overrule a person.
+ * Slug-level duplicates are still caught — in parseBrandPaste, where there is somewhere to
+ * report them. See brand-paste.ts.
  */
-interface AiVerdictInput {
-  name: string;
-  tier: 'rare' | 'common' | 'not_worthy' | 'unsorted';
-  models: string[];
-  lookFor: string | null;
-}
-
-/** Strongest first. A stray second mention must not demote a brand already judged well. */
-const TIER_RANK: Record<AiVerdictInput['tier'], number> = {
-  rare: 4,
-  common: 3,
-  not_worthy: 2,
-  // Lowest: "I could not tell" must never displace an actual judgement of the same brand.
-  unsorted: 1,
-};
-
-/**
- * Collapse verdicts that are the same brand.
- *
- * One response can name a brand twice — "Nike" and "Nike Inc", or the same name returned
- * in two chunks of a large batch. Both normalise to one slug, so without this the second
- * silently overwrites the first and its models are lost.
- */
-export function mergeVerdicts(verdicts: AiVerdictInput[]): {
-  verdicts: AiVerdictInput[];
-  /** Slug that was folded away -> the slug it was folded into. */
-  aliasOf: Map<string, string>;
-} {
-  const bySlug = new Map<string, AiVerdictInput & { modelSet: Set<string> }>();
-  const aliasOf = new Map<string, string>();
-
-  for (const verdict of verdicts) {
-    const slug = normaliseBrand(verdict.name);
-    if (!slug) continue;
-
-    const existing = bySlug.get(slug);
-    if (!existing) {
-      bySlug.set(slug, { ...verdict, modelSet: new Set(verdict.models) });
-      // Every canonical slug maps to itself, so callers need only one lookup.
-      aliasOf.set(slug, slug);
-      continue;
-    }
-
-    for (const model of verdict.models) existing.modelSet.add(model);
-    // Keep the first usable description rather than the last, and the stronger tier.
-    if (!existing.lookFor && verdict.lookFor) existing.lookFor = verdict.lookFor;
-    if (TIER_RANK[verdict.tier] > TIER_RANK[existing.tier]) existing.tier = verdict.tier;
-  }
-
-  /* Fold "Brand + model" rows into the brand.
-   *
-   * A model returned as though it were a brand — "Brooks Ghost Max" beside "Brooks",
-   * "Danner 2650" beside "Danner" — would otherwise become a second row competing with the
-   * real one. When one slug begins with another at a word boundary, the longer is the
-   * shorter plus a model: its models are absorbed and the row is dropped. */
-  const slugs = [...bySlug.keys()].sort((a, b) => a.length - b.length);
-  for (const longer of [...slugs].reverse()) {
-    const parent = slugs.find((s) => s !== longer && longer.startsWith(`${s} `));
-    if (!parent) continue;
-
-    const child = bySlug.get(longer)!;
-    const owner = bySlug.get(parent)!;
-    // The tail of the child's name IS the model, and so is anything it listed.
-    owner.modelSet.add(child.name.slice(child.name.length - (longer.length - parent.length) + 1).trim());
-    for (const model of child.modelSet) owner.modelSet.add(model);
-    if (!owner.lookFor && child.lookFor) owner.lookFor = child.lookFor;
-    if (TIER_RANK[child.tier] > TIER_RANK[owner.tier]) owner.tier = child.tier;
-    bySlug.delete(longer);
-
-    /* Record where it went, and re-point anything already pointing at it. A three-deep
-       fold ("Nike Air Jordan 1" -> "Nike Air Jordan" -> "Nike") must leave every alias
-       aimed at the brand that survived, not at an intermediate row that no longer exists. */
-    aliasOf.set(longer, parent);
-    for (const [from, to] of aliasOf) if (to === longer) aliasOf.set(from, parent);
-  }
-
-  return {
-    verdicts: [...bySlug.values()].map(({ modelSet, ...rest }) => ({
-      ...rest,
-      models: [...modelSet].filter((m) => m.length >= 2).slice(0, 20),
-    })),
-    aliasOf,
-  };
-}
 
 /**
  * Recompute every brand's sales figures from the listings themselves.
@@ -372,32 +289,128 @@ export function refreshBrandStats(categoryId?: number): number {
   return touched;
 }
 
+/**
+ * Match every listing in a category to a brand in the book, and to a model within it.
+ *
+ * THIS IS WHAT THE AI USED TO DO, and doing it with string matching instead is the whole
+ * bet of the change. The old path asked a model what each numbered listing WAS and stored
+ * the answer; a paste can carry those same answers in its `items` half, but only if it was
+ * produced against a freshly printed prompt. This runs afterwards either way, so a paste of
+ * bare brand names still ends up with sold counts, medians and per-model figures rather
+ * than a book full of zeroes.
+ *
+ * The two halves are matched differently on purpose:
+ *
+ *   brand   any listing whose title contains the brand's name, longest name first, so
+ *           "Polo Ralph Lauren" is never swallowed by "Ralph Lauren".
+ *   model   only within the brand the listing was already attributed to. "1460" in a title
+ *           means the Dr. Martens 1460 when the listing is a Dr. Martens; free of that
+ *           scope it is a number that means nothing.
+ *
+ * Anything already attributed is left alone unless what it points at has gone — a brand
+ * deleted from the book leaves listings aimed at nothing, and re-matching them is the only
+ * way those sales ever count again.
+ *
+ * Returns how many listings carry a brand when it finishes, which is the figure worth
+ * reporting: "how much of this category is identified", not "how much did I just change".
+ */
+export function attributeListings(categoryId: number): number {
+  const brands = db
+    .prepare(`SELECT ${BRAND_COLUMNS} FROM ebay_brands WHERE category_id = ?`)
+    .all(categoryId) as BrandRow[];
+  if (!brands.length) return 0;
+
+  const matchBrand = titleMatcher(brands);
+
+  const modelRows = db
+    .prepare(
+      `SELECT m.id, m.name, m.brand_id FROM ebay_brand_models m
+         JOIN ebay_brands b ON b.id = m.brand_id
+        WHERE b.category_id = ?`,
+    )
+    .all(categoryId) as Array<{ id: number; name: string; brand_id: number }>;
+
+  const modelsOf = new Map<number, Array<{ id: number; name: string }>>();
+  for (const row of modelRows) {
+    modelsOf.set(row.brand_id, [...(modelsOf.get(row.brand_id) ?? []), { id: row.id, name: row.name }]);
+  }
+  // Built once per brand rather than per listing — a category with a few thousand sales
+  // would otherwise rebuild the same matcher a few thousand times.
+  const matchModel = new Map<number, ReturnType<typeof titleMatcher<{ id: number; name: string }>>>();
+  for (const [brandId, list] of modelsOf) matchModel.set(brandId, titleMatcher(list));
+
+  const listings = db
+    .prepare('SELECT id, title, brand_id, model_id FROM ebay_listings WHERE category_id = ?')
+    .all(categoryId) as Array<{ id: number; title: string; brand_id: number | null; model_id: number | null }>;
+
+  const known = new Set(brands.map((b) => b.id));
+  const link = db.prepare(
+    'UPDATE ebay_listings SET brand_id = @brand_id, model_id = @model_id WHERE id = @id',
+  );
+
+  let attributed = 0;
+
+  db.transaction(() => {
+    for (const listing of listings) {
+      const brandId =
+        listing.brand_id !== null && known.has(listing.brand_id)
+          ? listing.brand_id
+          : (matchBrand(listing.title)?.id ?? null);
+
+      if (brandId === null) {
+        // Points at a brand that no longer exists and matches nothing now. Clear it rather
+        // than leave a dangling id that reads as "identified" and counts for nobody.
+        if (listing.brand_id !== null) link.run({ id: listing.id, brand_id: null, model_id: null });
+        continue;
+      }
+      attributed += 1;
+
+      const owned = modelsOf.get(brandId) ?? [];
+      const modelId =
+        listing.model_id !== null && owned.some((m) => m.id === listing.model_id)
+          ? listing.model_id
+          : (matchModel.get(brandId)?.(listing.title)?.id ?? null);
+
+      if (listing.brand_id === brandId && listing.model_id === modelId) continue;
+      link.run({ id: listing.id, brand_id: brandId, model_id: modelId });
+    }
+  })();
+
+  return attributed;
+}
+
 export interface ReadingResult {
   /** Brands that did not exist in this category and were created. */
   created: number;
-  /** Brands already in the book. Their tiers were read and discarded. */
+  /** Brands already in the book whose tier or description the paste changed. */
+  updated: number;
+  /** Brands already in the book, left exactly as they were. */
   untouched: number;
+  /** Brands the paste would have changed but could not, because they are pinned. */
+  locked: number;
   /** Model rows added. Existing models are never rewritten. */
   models: number;
-  /** Listings given a brand, a model, or both. */
+  /** Listings carrying a brand once the paste has been filed. */
   attributed: number;
 }
 
 /**
- * File a reading into the book. THE ONLY PLACE THE CLASSIFIER MAY WRITE.
+ * File a pasted reading into the book.
  *
  * The permissions, which are the point of this function:
  *
- *   brands   INSERT ONLY. A brand already in this category keeps the tier it has, full
- *            stop — not "unless unlocked", not "unless the AI is confident". There is no
- *            UPDATE statement here for tier or look_for, so there is no path, no flag and
- *            no future edit that quietly restores one. Moving a brand between tiers is the
- *            user's decision and the PATCH route is where it happens.
- *   models   INSERT ONLY. A new model under a known brand is a new fact, and facts are
- *            what the classifier is trusted with. An existing model keeps its verdict, so
- *            a model struck through by hand stays struck through.
- *   listings brand_id and model_id, set once. Everything else about a listing was settled
- *            at import and is never revisited.
+ *   brands   INSERT always; UPDATE only when the caller asks for it AND the brand is not
+ *            locked. This is the one rule that changed when the classifier left. It used to
+ *            be insert-only with no exception, because the thing writing was a model that
+ *            had no business overruling a person. What writes now IS the person, so a
+ *            correction pasted a second time has to be able to land — but it lands only on
+ *            request, so the ordinary paste still cannot quietly rewrite work you did by
+ *            hand, and the pin still refuses it outright either way.
+ *   models   INSERT ONLY, unchanged. An existing model keeps its verdict, so a model struck
+ *            through by hand stays struck through however many times it is pasted again.
+ *   listings brand_id and model_id, from `items` where the paste supplied them and from
+ *            title matching afterwards for the rest. Everything else about a listing was
+ *            settled at import and is never revisited.
  *
  * Scoped to one category throughout. Nike under Men/Shoes and Nike under Men/Shirts are
  * different rows with different tiers, and nothing here can read across that line.
@@ -406,20 +419,23 @@ export interface ReadingResult {
  */
 export function applyReading(
   categoryId: number,
-  reading: AiReading,
+  reading: BrandReading,
   listingIds: Array<number | undefined>,
+  options: { overwrite?: boolean } = {},
 ): ReadingResult {
-  const { verdicts, aliasOf } = mergeVerdicts(
-    reading.brands.map((b) => ({ name: b.name, tier: b.tier, models: b.models, lookFor: b.lookFor })),
-  );
   const at = nowIso();
 
   const selectBrand = db.prepare(
-    'SELECT id FROM ebay_brands WHERE category_id = ? AND slug = ?',
+    'SELECT id, tier, look_for, locked FROM ebay_brands WHERE category_id = ? AND slug = ?',
   );
   const insertBrand = db.prepare(
     `INSERT INTO ebay_brands (category_id, slug, name, tier, tier_source, look_for, first_seen, last_seen)
-     VALUES (@category_id, @slug, @name, @tier, 'ai', @look_for, @at, @at)`,
+     VALUES (@category_id, @slug, @name, @tier, 'paste', @look_for, @at, @at)`,
+  );
+  const updateBrand = db.prepare(
+    `UPDATE ebay_brands SET tier = @tier, look_for = @look_for, tier_source = 'paste',
+                            last_seen = @at
+      WHERE id = @id`,
   );
   // Only ever touches when-last-seen. Nothing a person decided is reachable from here.
   const touchBrand = db.prepare('UPDATE ebay_brands SET last_seen = @at WHERE id = @id');
@@ -431,7 +447,7 @@ export function applyReading(
      the verdict on it may have been set by hand. */
   const insertModel = db.prepare(
     `INSERT INTO ebay_brand_models (brand_id, slug, name, verdict, verdict_source, first_seen, last_seen)
-     VALUES (@brand_id, @slug, @name, 'worthy', 'ai', @at, @at)
+     VALUES (@brand_id, @slug, @name, 'worthy', 'paste', @at, @at)
      ON CONFLICT(brand_id, slug) DO NOTHING`,
   );
   const selectModel = db.prepare(
@@ -443,9 +459,10 @@ export function applyReading(
   );
 
   let created = 0;
+  let updated = 0;
   let untouched = 0;
+  let locked = 0;
   let models = 0;
-  let attributed = 0;
 
   /** Canonical slug -> brand id, for this category only. Filled as brands are settled. */
   const brandIds = new Map<string, number>();
@@ -462,48 +479,67 @@ export function applyReading(
   };
 
   db.transaction(() => {
-    for (const verdict of verdicts) {
+    for (const verdict of reading.brands) {
       const slug = normaliseBrand(verdict.name);
       if (!slug) continue;
 
-      const existing = selectBrand.get(categoryId, slug) as { id: number } | undefined;
-      if (existing) {
-        // Present already. Its tier is not this function's business.
-        touchBrand.run({ id: existing.id, at });
-        brandIds.set(slug, existing.id);
-        untouched += 1;
+      // The rule every other door enforces, enforced here too: no description, no common.
+      const resolved = resolveTier(verdict.tier, verdict.lookFor);
+      const existing = selectBrand.get(categoryId, slug) as
+        | { id: number; tier: string; look_for: string | null; locked: number }
+        | undefined;
+
+      if (!existing) {
+        const info = insertBrand.run({
+          category_id: categoryId,
+          slug,
+          name: verdict.name,
+          tier: resolved.tier,
+          look_for: resolved.look_for,
+          at,
+        });
+        brandIds.set(slug, Number(info.lastInsertRowid));
+        created += 1;
         continue;
       }
 
-      // New to this category, so the classifier's tier is the only one available. The same
-      // rule every other door enforces still applies: no description, no common.
-      const resolved = resolveTier(verdict.tier, verdict.lookFor);
-      const info = insertBrand.run({
-        category_id: categoryId,
-        slug,
-        name: verdict.name,
-        tier: resolved.tier,
-        look_for: resolved.look_for,
-        at,
-      });
-      brandIds.set(slug, Number(info.lastInsertRowid));
-      created += 1;
+      brandIds.set(slug, existing.id);
+
+      const differs =
+        existing.tier !== resolved.tier || (existing.look_for ?? null) !== resolved.look_for;
+
+      if (!options.overwrite || !differs) {
+        // Present already and not being rewritten. Its tier is not this pass's business.
+        touchBrand.run({ id: existing.id, at });
+        untouched += 1;
+        continue;
+      }
+      if (existing.locked === 1) {
+        // The pin means "stop revising this", and a bulk paste is exactly the revision it
+        // was set against. Counted so the answer can say so rather than imply it landed.
+        touchBrand.run({ id: existing.id, at });
+        locked += 1;
+        continue;
+      }
+
+      updateBrand.run({ id: existing.id, tier: resolved.tier, look_for: resolved.look_for, at });
+      updated += 1;
     }
 
-    // Models for every brand in every tier — rare included, which is the change.
-    for (const verdict of verdicts) {
+    // Models for every brand in every tier — rare included.
+    for (const verdict of reading.brands) {
       const brandId = brandIds.get(normaliseBrand(verdict.name));
       if (!brandId) continue;
       for (const name of verdict.models) modelId(brandId, name);
     }
 
-    /* Attribution last, once every brand named in this reading has an id. */
+    /* Per-listing attribution, where the paste carried it. Runs before the title matching
+       below so an answer written about these exact listings wins over a guess from words. */
     for (const item of reading.items) {
       const listingId = listingIds[item.index];
       if (listingId === undefined) continue;
 
-      const raw = normaliseBrand(item.brand);
-      const brandId = brandIds.get(aliasOf.get(raw) ?? raw);
+      const brandId = brandIds.get(normaliseBrand(item.brand));
       if (!brandId) continue;
 
       linkListing.run({
@@ -511,15 +547,15 @@ export function applyReading(
         brand_id: brandId,
         model_id: item.model ? modelId(brandId, item.model) : null,
       });
-      attributed += 1;
     }
   })();
 
-  // After the rows exist, not before — a brand created in this pass has no id to attribute
-  // listings to until it does.
+  // Both after the rows exist, not before — a brand created in this pass has no id to
+  // attribute listings to until it does, and no figures until they are attributed.
+  const attributed = attributeListings(categoryId);
   refreshBrandStats(categoryId);
 
-  return { created, untouched, models, attributed };
+  return { created, updated, untouched, locked, models, attributed };
 }
 
 /**

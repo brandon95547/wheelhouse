@@ -1,17 +1,22 @@
 /**
- * Print the exact prompt the classifier sends, for running by hand.
+ * Print the brand-classification prompt, followed by a category's sold listings.
  *
- * Imports SYSTEM from brand-ai.ts rather than restating it, so a prompt pasted into a chat
- * window is the one the app actually uses — a transcribed copy would drift on the first
- * edit and quietly test something else.
+ * THE APP NO LONGER SENDS THIS ANYWHERE. Wheelhouse has no API key and makes no model
+ * calls; this script exists so you can take the question somewhere yourself and paste the
+ * answer back into "Add brands" on the Brands tab.
  *
  *   npx tsx src/scripts/dump-prompt.ts men-shoes
+ *   npx tsx src/scripts/dump-prompt.ts men-shoes > /tmp/prompt.txt
  *
- * The chat form joins the two messages with a separator, because a chat window has no
- * system role to put the first half in.
+ * The two halves are joined by a `---` separator because a chat window has no system role
+ * to put the first one in — paste the whole thing as a single message.
+ *
+ * The numbering below is what a pasted `items[].i` refers to, and the import endpoint
+ * rebuilds this exact list to read it. Same filter, same order, same category: priced above
+ * zero, by id. Import more listings in between and the numbers no longer line up.
  */
 import { db } from '../lib/db.js';
-import { SYSTEM } from '../lib/brand-ai.js';
+import { SYSTEM } from '../lib/brand-prompt.js';
 
 const slug = process.argv[2] ?? 'men-shoes';
 

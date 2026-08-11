@@ -17,9 +17,14 @@ import {
   normaliseBrand,
   resolveTier,
 } from '../lib/brands.js';
-import { analyseBrands, applyProposals } from '../lib/brand-analysis.js';
-import { classifyStatus, startClassification } from '../lib/classify-job.js';
-import { aiConfigured } from '../lib/llm.js';
+import {
+  analyseBrands,
+  applyProposals,
+  applyReading,
+  attributeListings,
+  refreshBrandStats,
+} from '../lib/brand-analysis.js';
+import { parseBrandPaste } from '../lib/brand-paste.js';
 import { MIN_SAMPLE, RARE_GATES } from '../lib/brand-strength.js';
 
 const router: Router = Router();
@@ -197,15 +202,21 @@ router.post('/import', (req, res) => {
 
   const duplicates = valid.length - imported + duplicatesInBatch;
 
-  /* Started, NOT awaited. Classification takes the better part of a minute; waiting for it
-     inside the import is what made the extension time out and left the user staring at
-     listings with no brands. It also runs whenever the payload had usable listings — not
-     only when rows were inserted — because re-scanning the same page dedupes everything
-     and previously skipped classification altogether, leaving no way to retry.
-
-     Scoped to the category being imported into, which is the only book these listings can
-     teach anything about. */
-  const classifying = valid.length > 0 && aiConfigured() ? startClassification(category.id) : false;
+  /* Match what just arrived against the book, and only against the book.
+   *
+   * This used to start a background job that sent the whole scan to a language model and
+   * filed whatever came back. That is gone — no key, no call, no job, no waiting. What is
+   * left is arithmetic on brands you already put there: a new listing whose title carries a
+   * known brand joins that brand's sold count and median immediately, and a listing whose
+   * brand is not in the book yet simply waits until you add it.
+   *
+   * Cheap enough to do inline, unlike the thing it replaces. Scoped to the category being
+   * imported into, which is the only book these listings can belong to. */
+  let attributed = 0;
+  if (imported > 0) {
+    attributed = attributeListings(category.id);
+    refreshBrandStats(category.id);
+  }
 
   res.status(201).json({
     found: rawListings.length,
@@ -213,38 +224,113 @@ router.post('/import', (req, res) => {
     duplicates,
     failed: failed.length,
     errors: failed.slice(0, 25),
-    // The brand book fills in after this response. Say so, rather than let an empty
-    // Brands tab read as a failure.
-    classifying,
+    attributed,
     category: { slug: category.slug, name: category.name, group: category.group_name },
     message:
-      (imported > 0
+      imported > 0
         ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.`
-        : 'No new listings — every one was already imported.') +
-      (classifying
-        ? ' Reading brands and models now; they will appear in the Brands tab shortly.'
-        : aiConfigured()
-          ? ''
-          : ' No OPENAI_API_KEY, so no brands were read from this scan.'),
+        : 'No new listings — every one was already imported.',
   });
 });
 
 /* ------------------------------------------------------------------- brands */
 
-/* THE BRAND BOOK HAS ONE AUTHOR: the classifier.
+/* THE BRAND BOOK HAS ONE AUTHOR: YOU.
  *
- * There was a POST /brands here that accepted a brand rollup from outside. It is gone,
- * and nothing should put it back. Two things arrived through it that are not brands:
- * colour names, because the caller read every refinement list on the page rather than
- * the Brand one, and the leading words of unmatched titles — "air", "nike air",
- * "jordan retro" — which are fragments of a model, not a label anyone sources by.
+ * There was a POST /brands here once that accepted a brand rollup from the extension. It
+ * is gone and nothing should put it back — what arrived through it was not brands but
+ * colour names, because the caller read every refinement list on the eBay page rather than
+ * the Brand one, plus the leading words of unmatched titles ("air", "nike air", "jordan
+ * retro"), which are fragments of a model. A door that lets an outside guesser write
+ * brands cannot be made safe by validating harder at the threshold, because the caller
+ * cannot tell a brand from a colour in the first place.
  *
- * Both outran the classifier by twenty seconds and filled the book before it answered.
- * A door that lets an outside guesser write brands cannot be made safe by validating
- * harder at the threshold, because the caller cannot tell a brand from a colour in the
- * first place. So the door is closed: brands come from the AI verdicts, and from the
- * hand corrections a person makes afterwards. Nothing else writes here.
+ * For a while the answer was a language model, called from POST /brands/classify. That is
+ * gone too, and the reason is the same one in a different key: it could tell a brand from a
+ * colour, but it was still guessing, still costing money, and still writing rows nobody had
+ * agreed to. What replaces it is POST /brands/import below — the same JSON, the same shape,
+ * pasted by the person whose book it is.
+ *
+ * So there are exactly two ways a brand gets into this table: you paste it, or you type it.
+ * Nothing else writes here.
  */
+
+/**
+ * The listings a paste's `items` numbering refers to.
+ *
+ * Priced above zero, ordered by id, one category — the same list dump-prompt.ts numbers
+ * when it prints the prompt, and it must stay the same list or `items[].i` points at the
+ * wrong shoe. Kept in this file next to its only two callers rather than exported, so the
+ * definition cannot drift apart from the endpoint that depends on it.
+ */
+function numberedListingIds(categoryId: number): number[] {
+  return (
+    db
+      .prepare(
+        `SELECT id FROM ebay_listings
+          WHERE sold_price IS NOT NULL AND sold_price > 0 AND category_id = ?
+          ORDER BY id`,
+      )
+      .all(categoryId) as Array<{ id: number }>
+  ).map((row) => row.id);
+}
+
+/**
+ * Add brands from pasted JSON — the button on the Brands tab.
+ *
+ * Body: `{ category, overwrite?, payload }`, where `payload` is the parsed JSON exactly as
+ * it was pasted. See brand-paste.ts for the shapes accepted and brand-prompt.ts for where
+ * one comes from.
+ *
+ * `overwrite` is off unless asked for, and it is the difference between "add what is
+ * missing" and "make the book say this". Off, a brand already in the category is left
+ * untouched however emphatically the paste disagrees with it; on, unlocked brands are moved
+ * and locked ones are refused and counted. Either way the answer says which happened to how
+ * many, because a bulk write that reports only a total is indistinguishable from one that
+ * quietly did nothing.
+ */
+router.post('/brands/import', (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const category = resolveCategory(body.category ?? body.categorySlug);
+
+  let parsed;
+  try {
+    parsed = parseBrandPaste(body.payload ?? body.brands ?? body);
+  } catch (error) {
+    throw badRequest('Validation failed', [
+      { field: 'payload', message: error instanceof Error ? error.message : String(error) },
+    ]);
+  }
+
+  if (!parsed.brands.length) {
+    throw badRequest('Validation failed', [
+      {
+        field: 'payload',
+        message: parsed.problems.length
+          ? `Nothing could be filed. ${parsed.problems[0]}`
+          : 'No brands in that JSON — the "brands" array is empty.',
+      },
+    ]);
+  }
+
+  const result = applyReading(category.id, parsed, numberedListingIds(category.id), {
+    overwrite: Boolean(body.overwrite),
+  });
+
+  const said: string[] = [];
+  if (result.created) said.push(`${result.created} brand${result.created === 1 ? '' : 's'} added`);
+  if (result.updated) said.push(`${result.updated} changed`);
+  if (result.untouched) said.push(`${result.untouched} left as ${result.untouched === 1 ? 'it was' : 'they were'}`);
+  if (result.locked) said.push(`${result.locked} locked and skipped`);
+  if (result.models) said.push(`${result.models} new model${result.models === 1 ? '' : 's'}`);
+
+  res.status(201).json({
+    ...result,
+    problems: parsed.problems,
+    category: { slug: category.slug, name: category.name, group: category.group_name },
+    message: `${said.join(', ') || 'Nothing to do'} in ${category.group_name} / ${category.name}.`,
+  });
+});
 
 /**
  * What the sales say about every brand, and what tier that implies.
@@ -259,9 +345,6 @@ router.get('/brands/analysis', (req, res) => {
   );
   res.json({
     gates: { rare: RARE_GATES, minSample: MIN_SAMPLE },
-    // Surfaced so the report can say whether tiers are coming from DeepSeek plus the
-    // numbers, or from the numbers alone. A silently degraded mode is a trap.
-    aiConfigured: aiConfigured(),
     proposals,
     counts: {
       rare: proposals.filter((p) => p.proposedTier === 'rare').length,
@@ -277,57 +360,45 @@ router.get('/brands/analysis', (req, res) => {
 });
 
 /**
- * Classify the listings already stored — the button that rebuilds the brand book.
+ * Re-match every listing against the book, then re-score — and move nothing.
  *
- * Runs against everything imported, not just the last scan, so a book can be rebuilt at
- * any time without re-scanning eBay. Returns immediately; poll the GET below.
- */
-router.post('/brands/classify', (req, res) => {
-  if (!aiConfigured()) {
-    throw badRequest('Validation failed', [
-      { field: 'ai', message: 'OPENAI_API_KEY is not set, so brands cannot be classified.' },
-    ]);
-  }
-
-  /* A category is required, and "all" is no longer accepted. Brands are judged inside one
-     category, so a run across every category at once would have to decide which book a
-     brand belongs to — the exact guess this design exists to avoid. */
-  const started = startClassification(resolveCategory(req.body?.category).id);
-  res.status(started ? 202 : 409).json({
-    started,
-    ...classifyStatus(),
-    message: started
-      ? 'Classifying brands from the imported listings. This takes about a minute.'
-      : 'A classification run is already in progress.',
-  });
-});
-
-/** How the current or last classification run went. */
-router.get('/brands/classify', (_req, res) => {
-  res.json({ ...classifyStatus(), aiConfigured: aiConfigured() });
-});
-
-/**
- * Re-score every brand — and write nothing.
+ * Two different things, and only the first one writes. Attribution is arithmetic: which
+ * listing carries which brand, and which model within it. Re-running it is how a brand
+ * added today picks up the sales that were imported last month, and it is the only way a
+ * book edited by hand keeps its counts honest.
  *
- * The endpoint stays because the client still calls it and because the arithmetic behind
- * it is still worth reading; what it no longer has is the authority to act on the answer.
- * Once a brand is in the book its tier is the user's, so the honest response is the count
- * of brands that were looked at and left exactly as they were. See applyProposals.
+ * Scoring is the part that does NOT write. Once a brand is in the book its tier is yours,
+ * so the honest response is the count of brands the sold prices would file differently,
+ * offered as a suggestion. See applyProposals.
  */
 router.post('/brands/rescore', (req, res) => {
   const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
-  const proposals = analyseBrands(
-    category && category !== 'all' ? resolveCategory(category).id : undefined,
-  );
+  const categoryId = category && category !== 'all' ? resolveCategory(category).id : undefined;
+
+  /* Every category when none is named. Attribution never crosses a category — a listing
+     can only match a brand in its own book — so doing them one at a time is the same work
+     as doing them together, minus the chance of reading across the line by accident. */
+  const ids = categoryId
+    ? [categoryId]
+    : (db.prepare('SELECT id FROM ebay_categories').all() as Array<{ id: number }>).map((c) => c.id);
+
+  let attributed = 0;
+  for (const id of ids) attributed += attributeListings(id);
+  refreshBrandStats(categoryId);
+
+  const proposals = analyseBrands(categoryId);
   const result = applyProposals(proposals);
   const differ = proposals.filter((p) => p.changed).length;
+
   res.json({
     ...result,
+    attributed,
     proposals: differ,
-    message: differ
-      ? `${differ} brand${differ === 1 ? '' : 's'} would be tiered differently by the sold prices. None were changed — tiers are yours to move.`
-      : 'The sold prices agree with every tier in the book.',
+    message:
+      `${attributed} listing${attributed === 1 ? '' : 's'} matched to a brand. ` +
+      (differ
+        ? `${differ} brand${differ === 1 ? '' : 's'} would be tiered differently by the sold prices. None were changed — tiers are yours to move.`
+        : 'The sold prices agree with every tier in the book.'),
   });
 });
 

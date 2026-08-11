@@ -317,7 +317,7 @@ $('send').addEventListener('click', async () => {
       $('warnings').hidden = false;
       $('warnings').innerHTML =
         `<p>${imported} listing${imported === 1 ? '' : 's'} imported, ${dupes} already there.</p>` +
-        '<p>Wheelhouse is classifying the brands now — they appear in its Brands tab, not here.</p>';
+        '<p>Wheelhouse matches them against its brand book on arrival. Brands live in its Brands tab, not here.</p>';
     }
   } catch (error) {
     $('send').textContent = 'Send to Wheelhouse';

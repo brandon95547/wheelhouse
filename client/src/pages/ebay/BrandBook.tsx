@@ -26,16 +26,30 @@
  * thrift store, and the only order that helps then is the one your eye can scan.
  *
  * The whole page is built to be CORRECTED. Every brand can move tier and every model can
- * flip verdict, in one click, because the classification will be wrong sometimes and the
+ * flip verdict, in one click, because a classification will be wrong sometimes and the
  * cost of a wrong row is a missed pickup or a wasted one.
+ *
+ * WHERE THE ROWS COME FROM. Two places, both of them you. "Add brands" takes a pasted block
+ * of JSON — name, tier, what to look for — and files the lot in one go; everything else on
+ * the page edits one row at a time. Wheelhouse used to fill this book itself by sending
+ * every scan to a language model, and does not any more: no key, no call, nothing deciding
+ * what a brand is worth except the person reading it.
  */
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Ban, Check, Download, Gem, Lock, LockOpen, Plus, Search, Store, X } from 'lucide-react';
+import { AlertTriangle, Ban, Check, Download, Gem, Lock, LockOpen, Plus, Search, Store, Upload, X } from 'lucide-react';
+import { Modal } from '../../components/Modal';
 import { EmptyState, ErrorState, LoadingState, SearchInput } from '../../components/ui';
 import { useApi, useDebouncedValue } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
-import { api } from '../../lib/api';
-import type { BrandTier, EbayBrand, EbayBrandBook, EbayCategory, ModelVerdict } from '../../lib/types';
+import { ApiError, api } from '../../lib/api';
+import type {
+  BrandPasteResult,
+  BrandTier,
+  EbayBrand,
+  EbayBrandBook,
+  EbayCategory,
+  ModelVerdict,
+} from '../../lib/types';
 
 const GROUPS: Array<{
   tier: BrandTier;
@@ -130,6 +144,7 @@ export function BrandBook() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('all');
   const [exporting, setExporting] = useState(false);
+  const [adding, setAdding] = useState(false);
   const query = useDebouncedValue(search, 250);
   const { data: categories } = useApi<EbayCategory[]>('/ebay/categories');
   const book = useApi<EbayBrandBook>('/ebay/brands', { search: query, category });
@@ -248,14 +263,37 @@ export function BrandBook() {
   if (book.loading && !book.data) return <LoadingState label="Loading the brand book…" />;
   if (book.error) return <ErrorState message={book.error} onRetry={book.reload} />;
 
+  /* Mounted only while open, so every visit starts empty rather than showing the last
+     paste's text and result. It also lets the dialog read the category picker as it is at
+     the moment you press the button. */
+  const addDialog = adding ? (
+    <AddBrandsDialog
+      onClose={() => setAdding(false)}
+      categories={categories ?? []}
+      // The book you are already reading, unless you are reading all of them at once —
+      // there is no such thing as adding a brand to "all categories".
+      defaultCategory={category === 'all' ? '' : category}
+      onDone={book.reload}
+    />
+  ) : null;
+
   const total = book.data?.brands.length ?? 0;
   if (!total && !query) {
     return (
-      <EmptyState
-        icon={Gem}
-        title="No brands yet"
-        description="Scan a page of sold listings with the Lookout extension and send it here. Brands build up from what actually sold."
-      />
+      <>
+        <EmptyState
+          icon={Gem}
+          title="No brands yet"
+          description="Paste a block of classified brands to fill the book, or scan sold listings with the Lookout extension first so the brands you add arrive with prices behind them."
+          action={
+            <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+              <Upload className="size-4" aria-hidden="true" />
+              Add brands
+            </button>
+          }
+        />
+        {addDialog}
+      </>
     );
   }
 
@@ -294,7 +332,13 @@ export function BrandBook() {
           <Download className="size-4" aria-hidden="true" />
           {exporting ? 'Exporting…' : 'Export'}
         </button>
+        <button type="button" className="btn btn-primary" onClick={() => setAdding(true)}>
+          <Upload className="size-4" aria-hidden="true" />
+          Add brands
+        </button>
       </div>
+
+      {addDialog}
 
       {query && total === 0 ? (
         <EmptyState icon={Search} title="No matches" description="No brand in the book matches that search." />
@@ -334,6 +378,223 @@ export function BrandBook() {
         );
       })}
     </div>
+  );
+}
+
+/* An example rather than a schema, because the shape is easier to copy than to read. Two
+   rows, one of each kind that behaves differently: a rare brand needs nothing but its name,
+   and a common one is nothing without its "lookFor". */
+const PASTE_EXAMPLE = `{
+  "brands": [
+    { "name": "Danner", "tier": "rare", "lookFor": null },
+    {
+      "name": "Nike",
+      "tier": "common",
+      "lookFor": "SB Dunk, Kobe, limited Air Max, collaborations",
+      "models": ["SB Dunk Low", "Air Max 90"]
+    }
+  ]
+}`;
+
+/**
+ * Add brands from pasted JSON.
+ *
+ * This is the whole of what used to be an API key, a background job and a minute of
+ * waiting. The JSON is the same JSON — see server/src/lib/brand-prompt.ts for the prompt
+ * that produces it, and `npx tsx src/scripts/dump-prompt.ts <category>` for a copy of it
+ * with your listings attached — but the app is no longer the thing holding the conversation.
+ *
+ * The paste is parsed HERE before it is sent, so a stray comma is a red line under the box
+ * rather than a round trip. Everything past "is this JSON" is the server's to judge, and it
+ * answers with the rows it could not file rather than a total that hides them.
+ */
+function AddBrandsDialog({
+  onClose,
+  categories,
+  defaultCategory,
+  onDone,
+}: {
+  onClose: () => void;
+  categories: EbayCategory[];
+  defaultCategory: string;
+  onDone: () => void;
+}) {
+  const toast = useToast();
+  const [category, setCategory] = useState(defaultCategory);
+  const [text, setText] = useState('');
+  const [overwrite, setOverwrite] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [result, setResult] = useState<BrandPasteResult | null>(null);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, EbayCategory[]>();
+    for (const item of categories) {
+      map.set(item.group_name, [...(map.get(item.group_name) ?? []), item]);
+    }
+    return [...map.entries()];
+  }, [categories]);
+
+  /* Parsed on every keystroke rather than on submit. The paste is long and the mistake in
+     it is usually one character, so saying which character while the box is still open is
+     worth more than a tidy error afterwards. */
+  const parsed = useMemo(() => {
+    const body = text.trim();
+    if (!body) return { value: null, error: null };
+    try {
+      return { value: JSON.parse(body) as unknown, error: null };
+    } catch (error) {
+      return { value: null, error: error instanceof Error ? error.message : 'That is not valid JSON.' };
+    }
+  }, [text]);
+
+  async function submit() {
+    if (!category) {
+      toast.error('Choose which category these brands belong to.');
+      return;
+    }
+    if (parsed.value === null) return;
+
+    setSaving(true);
+    try {
+      const response = await api.post<BrandPasteResult>('/ebay/brands/import', {
+        category,
+        overwrite,
+        payload: parsed.value,
+      });
+      setResult(response);
+      setText('');
+      onDone();
+      toast.success(response.message);
+    } catch (error) {
+      toast.error(
+        error instanceof ApiError
+          ? (error.fieldErrors[0]?.message ?? error.message)
+          : 'Could not add those brands.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      size="lg"
+      title="Add brands"
+      description="Paste classified brands as JSON. Wheelhouse files them; it does not judge them."
+    >
+      <div className="space-y-4 p-5">
+        <div>
+          <label className="label" htmlFor="paste-category">
+            Category
+          </label>
+          <select
+            id="paste-category"
+            className="select"
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="">— Choose a category —</option>
+            {groups.map(([group, items]) => (
+              <optgroup key={group} label={group}>
+                {items.map((item) => (
+                  <option key={item.slug} value={item.slug}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-on-surface-muted">
+            A brand is judged inside one category — Nike on a shoe rack is a different
+            question from Nike on a shirt rail — so these rows go into that book and no other.
+          </p>
+        </div>
+
+        <div>
+          <label className="label" htmlFor="paste-json">
+            Brands JSON
+          </label>
+          <textarea
+            id="paste-json"
+            className={`textarea min-h-56 font-mono text-xs ${parsed.error ? 'input-invalid' : ''}`}
+            value={text}
+            spellCheck={false}
+            placeholder={PASTE_EXAMPLE}
+            onChange={(event) => setText(event.target.value)}
+            aria-invalid={Boolean(parsed.error)}
+            aria-describedby="paste-json-help"
+          />
+          <p id="paste-json-help" className="mt-1 text-xs text-on-surface-muted">
+            Each brand needs a <code>name</code> and a <code>tier</code> —{' '}
+            <code>rare</code>, <code>common</code>, <code>not_worthy</code> or{' '}
+            <code>unsorted</code>. A common brand also needs <code>lookFor</code> saying which
+            models pay; without one it is filed unsorted, because a bare "Nike" in an aisle
+            reads as an endorsement of every Nike on the rack. <code>models</code> is optional,
+            and an <code>items</code> array from the full prompt is used if you include it.
+          </p>
+          {parsed.error ? (
+            <p className="mt-1 flex items-start gap-1.5 text-xs text-danger-text">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+              {parsed.error}
+            </p>
+          ) : null}
+        </div>
+
+        <label className="flex items-start gap-2 text-sm text-on-surface-variant">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={overwrite}
+            onChange={(event) => setOverwrite(event.target.checked)}
+          />
+          <span>
+            Change brands already in this book
+            <span className="block text-xs text-on-surface-muted">
+              Off, a brand already here keeps the tier and description it has and only new
+              brands are added. On, the paste moves them — except locked ones, which refuse
+              it and are counted back to you.
+            </span>
+          </span>
+        </label>
+
+        {result ? (
+          <div className="rounded border border-outline-variant bg-surface-container p-3">
+            <p className="text-sm text-on-surface">{result.message}</p>
+            <p className="mt-1 text-xs text-on-surface-muted">
+              {result.attributed} listing{result.attributed === 1 ? '' : 's'} in{' '}
+              {result.category.name} now match a brand in the book.
+            </p>
+            {result.problems.length ? (
+              <ul className="mt-2 space-y-1">
+                {result.problems.map((problem) => (
+                  <li key={problem} className="flex items-start gap-1.5 text-xs text-danger-text">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+                    {problem}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            {result ? 'Done' : 'Cancel'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={submit}
+            disabled={saving || !category || parsed.value === null}
+          >
+            <Upload className="size-4" aria-hidden="true" />
+            {saving ? 'Adding…' : 'Add brands'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

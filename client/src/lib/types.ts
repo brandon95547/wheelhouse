@@ -230,6 +230,21 @@ export interface EbayBrandBook {
   counts: { rare: number; common: number; unsorted: number; not_worthy: number };
 }
 
+/* What `POST /ebay/brands/import` did with a paste. Every row it could not file comes back
+   in `problems`, worded for the person who wrote it — a bulk write that reported only a
+   total would be indistinguishable from one that quietly dropped half the input. */
+export interface BrandPasteResult {
+  created: number;
+  updated: number;
+  untouched: number;
+  locked: number;
+  models: number;
+  attributed: number;
+  problems: string[];
+  category: { slug: string; name: string; group: string };
+  message: string;
+}
+
 /* What the sold-price evidence says about a brand. Rank statistics only — see
    server/src/lib/brand-strength.ts for why the mean is never used. */
 export interface BrandStats {

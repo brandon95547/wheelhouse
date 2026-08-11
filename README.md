@@ -88,7 +88,7 @@ the browser extension.
 | `server` | `npm run typecheck` | TypeScript check, no output |
 | `server` | `npm run db:init` | Create the database and seed configuration |
 | `server` | `npm run db:reset` | Delete all business records |
-| `server` | `npx tsx src/scripts/dump-prompt.ts <category>` | Print the classifier prompt for review — see below |
+| `server` | `npx tsx src/scripts/dump-prompt.ts <category>` | Print a classification prompt plus that category's listings — see below |
 | `client` | `npm run dev` | Vite dev server on port 5173 |
 | `client` | `npm run build` | Type check, then production build |
 | `client` | `npm run preview` | Serve the production build |
@@ -140,18 +140,53 @@ tiers and separate models. Brands are Rare (the label alone is the pickup
 signal), Common (only certain models pay, and the row must say which), Unsorted
 or Not worth it.
 
-Who may change what:
+Brands get into the book two ways, and both of them are you:
 
-| | Create a brand | Change an existing brand's tier | Add a model |
-| --- | --- | --- | --- |
-| Classifier | yes, if new to the category | **never** | yes, any brand, any tier |
-| You | — | yes, in the Brand Book | yes |
+**Add brands** — the button on the Brands tab. Paste a block of JSON, pick the
+category, and every brand in it is filed at once:
 
-The classifier is a seeker, not an editor. It reads a scan, files brands it has
-not seen before, records what each listing is (its brand and its model), and
-adds models it finds. It cannot revise a brand already in the book — there is no
-UPDATE for `tier` or `look_for` on that path, so no flag or later edit can
-restore one. Moving a brand between tiers is yours alone.
+```json
+{
+  "brands": [
+    { "name": "Danner", "tier": "rare", "lookFor": null },
+    {
+      "name": "Nike",
+      "tier": "common",
+      "lookFor": "SB Dunk, Kobe, limited Air Max, collaborations",
+      "models": ["SB Dunk Low", "Air Max 90"]
+    }
+  ]
+}
+```
+
+`name` and `tier` are all a row needs. `models` is optional. A bare array of
+brand objects works too, and so does the fuller shape with an `items` array —
+see *Classifying brands* below for where one of those comes from.
+
+Rows that cannot be filed come back listed rather than dropped in silence: an
+unknown tier, a brand named twice, a common brand with no `lookFor`. That last
+one is filed `unsorted` instead of refused, and told to you, because a common row
+that cannot say what to look for reads in an aisle as an endorsement of
+everything the brand makes.
+
+**Adding is not overwriting.** A brand already in that category keeps the tier
+and description it has, however emphatically the paste disagrees, unless you tick
+*Change brands already in this book*. Even then a locked brand refuses and is
+counted back to you. So a paste can correct the book on purpose, and cannot
+undo an afternoon of hand-sorting by accident.
+
+Models are insert-only either way. A model struck through by hand stays struck
+through however many times it is pasted again.
+
+Nothing else writes to the book. There is no classifier, no API key and no
+background job — Wheelhouse used to send every scan to a language model and file
+whatever came back, and that whole path is gone.
+
+Once brands exist, **Re-match listings** on the Report tab points every imported
+sale at the brand in its title and at the model within that brand, which is where
+the sold counts, medians and per-model figures come from. It runs automatically
+after an import and after a paste; run it by hand after editing brands, since a
+brand added today knows nothing about listings imported last month until it does.
 
 The Report page still scores every brand against its sold prices and says where
 the numbers disagree with the book, but it no longer applies anything.
@@ -279,6 +314,8 @@ return `400` with `{ "error": "Validation failed", "details": [{ "field", "messa
 | GET | `/api/ebay/categories` | The 13 seeded categories |
 | GET | `/api/ebay/listings` | `?search=`, `?category=<slug>` |
 | POST | `/api/ebay/import` | Body `{ category, sourceUrl?, listings[] }` |
+| POST | `/api/ebay/brands/import` | Add brands from pasted JSON. Body `{ category, overwrite?, payload }` |
+| POST | `/api/ebay/brands/rescore` | Re-match listings to the book, then report what the prices say |
 | GET | `/api/ebay/stats` | Count, average, median, lowest, highest |
 | DELETE | `/api/ebay/listings` | `?category=<slug>` to limit the scope |
 | DELETE | `/api/ebay/listings/:id` | Remove one listing |
@@ -288,12 +325,12 @@ return `400` with `{ "error": "Validation failed", "details": [{ "field", "messa
 `leads`, `contacts`, `referral_partners`, `projects`, `events`, `notes`,
 `ebay_listings` — all empty until you add something.
 
-`ebay_brands`, `ebay_brand_models` — the brand book, built by the classifier and
-corrected by you. `ebay_brands` is unique on `(category_id, slug)` rather than
-on `slug` alone, which is what keeps one book per category. Models hang off
-`brand_id` and inherit their category through it. Each listing carries the
-`brand_id` and `model_id` it was identified as, so a model's sold count and
-median come from the sales that actually bore it.
+`ebay_brands`, `ebay_brand_models` — the brand book, pasted and corrected by you.
+`ebay_brands` is unique on `(category_id, slug)` rather than on `slug` alone,
+which is what keeps one book per category. Models hang off `brand_id` and inherit
+their category through it. Each listing carries the `brand_id` and `model_id` it
+was matched to, so a model's sold count and median come from the sales that
+actually bore it.
 
 `ebay_categories`, `option_values` — configuration, seeded at migration time.
 
@@ -322,10 +359,15 @@ group would orphan every listing and brand already filed under `men-shoes`.
 
 ---
 
-## Reviewing the classifier prompt
+## Classifying brands
 
-The prompt sent to the model is worth reading before you trust what comes back.
-Print the exact one for a category:
+Wheelhouse does not classify anything. It stores what you tell it, and *Add
+brands* on the Brands tab is where you tell it. Writing the JSON by hand is a
+perfectly good way to use that box.
+
+If you would rather have something else draft it, the question that used to be
+sent for you is still here as text, and this prints it with a category's listings
+attached:
 
 ```bash
 cd server
@@ -335,31 +377,33 @@ npx tsx src/scripts/dump-prompt.ts men-shoes > /tmp/prompt.txt   # to a file
 
 The category argument is a slug (`men-shoes`, `mens-clothing-shirts`, …);
 `men-shoes` is the default, and an unknown one prints the list of valid slugs.
-A header line with the category and listing count goes to stderr, so the
-redirect above captures only the prompt itself.
+A header line with the category and listing count goes to stderr, so the redirect
+captures only the prompt.
 
-Output is the two messages joined by a `---` line: the system prompt above it,
-the numbered sold listings below. To run it by hand in a chat window, paste the
-whole thing as one message — a chat window has no system role, which is why the
-separator is there.
+Output is two halves joined by a `---` line: the question above it, the numbered
+sold listings below. Paste the whole thing as one message wherever you like, then
+paste the JSON that comes back into *Add brands*. Nothing about that round trip
+touches Wheelhouse, so what you use, whether you pay for it, and whether you use
+anything at all are all yours to decide.
 
-Two differences to expect when comparing a hand-run against the app:
+The numbering matters only if the answer includes an `items` array. Those `i`
+values point at the lines the script printed, and the import rebuilds that exact
+list — priced above zero, ordered by id, one category — to read them. Import more
+listings in between and they no longer line up, so paste `items` promptly or
+leave it out; a paste of brand names alone still gets full figures, because
+*Re-match listings* derives the per-listing attribution from titles anyway.
 
-- the app sends the halves as real `system` and `user` messages with
-  `response_format: json_object` forced, so a chat window may wrap the JSON in
-  prose that the app would never see;
-- the app uses whatever `OPENAI_MODEL` names (default `gpt-5-nano`), which is a
-  much smaller model than the one behind a chat window — better output by hand
-  does not mean the prompt is fine.
-
-The script imports `SYSTEM` from `server/src/lib/brand-ai.ts` rather than
-restating it, so what it prints is always what the app actually sends.
+The prompt text lives in `server/src/lib/brand-prompt.ts` and the script imports
+it, so what it prints is always the current wording. Edit it freely — nothing in
+the app depends on the answer's tone, only on its shape, which
+`server/src/lib/brand-paste.ts` defines.
 
 ---
 
 ## Deliberately not in this version
 
-No AI features, no complex automation, no advanced analytics, no opportunity
+No AI features — Wheelhouse holds no API key, makes no model calls, and has no
+background jobs. No complex automation, no advanced analytics, no opportunity
 scoring, no payments, no email integration, and no third-party calendar
 integration. eBay research calculates only total, average, median, lowest and
 highest sold price.

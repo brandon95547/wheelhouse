@@ -15,9 +15,15 @@
  * a brand already in the book keeps the tier it has until the user changes it in the Brand
  * Book. What was once an "Apply" button is now a comparison: here is what the sold prices
  * would say, next to what the book says, and the difference is yours to act on or ignore.
+ *
+ * The "Classify brands" panel that used to sit at the top is gone with the model behind it.
+ * What it did — read the listings, invent the brands, write them down — is now "Add brands"
+ * on the Brand Book tab, where you paste the classification instead of buying one. What is
+ * left here is "Re-match listings", which is the half of that job that was ever arithmetic:
+ * pointing each sale at a brand already in the book so the figures below are current.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, Gem, Lock, RefreshCw, Sparkles, Store, TrendingDown } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+import { AlertTriangle, Check, Gem, Lock, RefreshCw, Store, TrendingDown } from 'lucide-react';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
@@ -57,66 +63,13 @@ const STRENGTH: Record<
 
 const pct = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 
-interface ClassifyStatus {
-  running: boolean;
-  startedAt: string | null;
-  finishedAt: string | null;
-  listingCount: number;
-  /** Mirrors ReadingResult on the server. `untouched` is the promise being kept. */
-  result: {
-    created: number;
-    untouched: number;
-    models: number;
-    attributed: number;
-  } | null;
-  error: string | null;
-  aiConfigured: boolean;
-}
-
-/**
- * Reads the classification job while it runs.
- *
- * Polls only while something is happening. A job that takes a minute with no visible sign
- * of life is the failure this whole panel exists to prevent — an empty Brands tab looked
- * exactly like a broken one.
- */
-function useClassifyStatus(onFinish: () => void) {
-  const [status, setStatus] = useState<ClassifyStatus | null>(null);
-  const wasRunning = useRef(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const read = async () => {
-      try {
-        const next = await api.get<ClassifyStatus>('/ebay/brands/classify');
-        if (cancelled) return;
-        setStatus(next);
-        if (wasRunning.current && !next.running) onFinish();
-        wasRunning.current = next.running;
-      } catch {
-        /* The panel is a progress readout; a failed poll is not worth a toast. */
-      }
-    };
-
-    read();
-    const timer = setInterval(read, 3000);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [onFinish]);
-
-  return { status, setStatus };
-}
-
 export function BrandReport() {
   const toast = useToast();
-  /* Classification runs against ONE category, and there is no "all". A brand is judged
-     inside a category, so a run across every category at once would have to decide which
-     book each brand belongs to — the guess the whole design exists to avoid. Empty until
-     chosen, so the button cannot fire against a category nobody picked. */
+  /* Empty means every category, which is the right default for a page you read rather than
+     act on. Attribution below never crosses a category line either way, so "all" is a
+     wider view of the same arithmetic, not a looser one. */
   const [category, setCategory] = useState('');
+  const [matching, setMatching] = useState(false);
   const { data: categories } = useApi<EbayCategory[]>('/ebay/categories');
   const analysis = useApi<BrandAnalysis>('/ebay/brands/analysis', { category: category || 'all' });
 
@@ -130,54 +83,46 @@ export function BrandReport() {
     return [...groups.entries()];
   }, [categories]);
 
-  const onFinish = useCallback(() => {
-    analysis.reload();
-    toast.success('Brand classification finished.');
-  }, [analysis, toast]);
-
-  const { status, setStatus } = useClassifyStatus(onFinish);
-
-  async function classify() {
-    if (!category) {
-      toast.error('Choose which category to classify first.');
-      return;
-    }
+  const rematch = useCallback(async () => {
+    setMatching(true);
     try {
-      const next = await api.post<ClassifyStatus & { message: string }>(
-        '/ebay/brands/classify',
-        { category },
-      );
-      setStatus(next);
-      toast.success(next.message);
+      const result = await api.post<{ message: string }>('/ebay/brands/rescore', {
+        category: category || 'all',
+      });
+      analysis.reload();
+      toast.success(result.message);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not start classification.');
+      toast.error(error instanceof Error ? error.message : 'Could not re-match the listings.');
+    } finally {
+      setMatching(false);
     }
-  }
+  }, [analysis, category, toast]);
 
-  /* The classify panel renders BEFORE any early return. When the brand book is empty this
-     panel is the only thing that can fill it, so hiding it behind "nothing to report yet"
-     would hide the button that fixes exactly that. */
-  const classifyPanel = (
+  /* This panel renders BEFORE any early return. When there is nothing to report it is the
+     only control on the page, and hiding it behind "no brands yet" would hide the button
+     that makes a freshly pasted book count its sales. */
+  const matchPanel = (
     <section className="card p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-on-surface">Read brands and models from your listings</h2>
+          <h2 className="text-sm font-semibold text-on-surface">Match listings to the book</h2>
           <p className="mt-1 text-xs text-on-surface-muted">
-            Reads every imported sold listing in one category and records what each one is —
-            its brand, and its model. A brand that is new to the category is filed with a
-            starting tier; a brand already in the book keeps the tier you gave it, always.
-            New models are added under both. Takes about a minute.
+            Points every imported sale at the brand in its title, and at the model within
+            that brand, so the figures below come from the sales that actually carried them.
+            Run it after adding brands by hand — a brand added today does not know about the
+            listings imported last month until this has seen them. It moves nothing between
+            tiers.
           </p>
-          <label className="sr-only" htmlFor="classify-category">
-            Category to classify
+          <label className="sr-only" htmlFor="report-category">
+            Category to report on
           </label>
           <select
-            id="classify-category"
+            id="report-category"
             className="select mt-2 w-full sm:w-64"
             value={category}
             onChange={(event) => setCategory(event.target.value)}
           >
-            <option value="">— Choose a category —</option>
+            <option value="">All categories</option>
             {categoryGroups.map(([group, items]) => (
               <optgroup key={group} label={group}>
                 {items.map((item) => (
@@ -188,38 +133,15 @@ export function BrandReport() {
               </optgroup>
             ))}
           </select>
-          {status?.running ? (
-            <p className="mt-2 flex items-center gap-2 text-xs text-on-surface">
-              <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
-              Working through {status.listingCount} listing{status.listingCount === 1 ? '' : 's'}…
-            </p>
-          ) : status?.error ? (
-            <p className="mt-2 flex items-start gap-1.5 text-xs text-danger-text">
-              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-              {status.error}
-            </p>
-          ) : status?.result ? (
-            /* "Left as they were" is stated rather than implied. It is the whole promise of
-               this button — that running it cannot undo a tier you set — and a count that
-               only mentioned what changed would leave the user guessing. */
-            <p className="mt-2 text-xs text-on-surface-muted">
-              Last run: {status.result.created} new brand
-              {status.result.created === 1 ? '' : 's'}, {status.result.models} new model
-              {status.result.models === 1 ? '' : 's'}, {status.result.attributed} listing
-              {status.result.attributed === 1 ? '' : 's'} identified.{' '}
-              {status.result.untouched} brand{status.result.untouched === 1 ? '' : 's'} already
-              in the book were left exactly as they were.
-            </p>
-          ) : null}
         </div>
         <button
           type="button"
-          className="btn btn-primary shrink-0 sm:ml-auto"
-          onClick={classify}
-          disabled={status?.running || status?.aiConfigured === false}
+          className="btn btn-secondary shrink-0 sm:ml-auto"
+          onClick={rematch}
+          disabled={matching}
         >
-          <Sparkles className="size-4" aria-hidden="true" />
-          {status?.running ? 'Classifying…' : 'Classify brands'}
+          <RefreshCw className={`size-4 ${matching ? 'animate-spin' : ''}`} aria-hidden="true" />
+          {matching ? 'Matching…' : 'Re-match listings'}
         </button>
       </div>
     </section>
@@ -228,7 +150,7 @@ export function BrandReport() {
   if (analysis.loading && !analysis.data) {
     return (
       <div className="space-y-6">
-        {classifyPanel}
+        {matchPanel}
         <LoadingState label="Scoring every brand…" />
       </div>
     );
@@ -239,11 +161,11 @@ export function BrandReport() {
   if (!proposals.length) {
     return (
       <div className="space-y-6">
-        {classifyPanel}
+        {matchPanel}
         <EmptyState
           icon={Gem}
           title="No brands yet"
-          description="Import sold listings, then press Classify brands to sort them into Rare, Common and Not worth it."
+          description="Nothing to score until the book has something in it. Add brands on the Brands tab — paste them as JSON — and their sold prices will be waiting here."
         />
       </div>
     );
@@ -262,7 +184,7 @@ export function BrandReport() {
 
   return (
     <div className="space-y-6">
-      {classifyPanel}
+      {matchPanel}
 
       <section className="card p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">

@@ -455,11 +455,11 @@ async function sendToWheelhouse({ wheelhouseUrl, category }) {
    * names, because readBrandFacet() reads every refinement list in eBay's sidebar and
    * not only the Brand one, plus the leading words of unmatched titles — "air",
    * "nike air", "jordan retro" — which are fragments of a model. Sixteen such rows
-   * reached Wheelhouse's brand book ahead of the classifier and were the first thing
-   * shown under Unsorted.
+   * reached Wheelhouse's brand book and were the first thing shown under Unsorted.
    *
-   * Wheelhouse classifies brands itself, from the listings, with a model that can tell
-   * a brand from a colour. This end sends listings. That is the whole contract. */
+   * Wheelhouse's brand book is written by its user, by hand or by pasting a block of
+   * classified brands into it. Nothing this end guesses belongs in there. This end sends
+   * listings. That is the whole contract. */
 
   await setRun({ sent: { at: Date.now(), ...result } });
   return result;

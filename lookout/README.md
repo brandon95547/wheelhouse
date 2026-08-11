@@ -161,13 +161,13 @@ deliberately, not left unbuilt.
 The reason is worth knowing before anyone rebuilds it: what arrived through that door was
 not brands. Colour names came through, because the caller read every refinement list on
 the page rather than the Brand one, and so did the leading words of unmatched titles —
-"air", "nike air", "jordan retro". They also beat the classifier by twenty seconds and
-filled the book before it answered. A door that lets an outside guesser write brands
-cannot be made safe by validating harder at the threshold, because the caller cannot tell
-a brand from a colour in the first place.
+"air", "nike air", "jordan retro". A door that lets an outside guesser write brands cannot
+be made safe by validating harder at the threshold, because the caller cannot tell a brand
+from a colour in the first place.
 
-Wheelhouse now derives brands from the listings themselves. The rollup post fails
-harmlessly and is reported rather than thrown, so a working import is never discarded.
+Wheelhouse's brand book is now written by its user — typed in a row at a time, or pasted
+in as a block of classified JSON. The rollup post fails harmlessly and is reported rather
+than thrown, so a working import is never discarded.
 
 **The eBay selectors are unverified against today's live eBay.** `content/parser.js` is
 inherited from the Wheelhouse importer and carries three layout strategies with text-based
@@ -175,14 +175,17 @@ fallbacks, but no one has confirmed them against a current sold-results page. If
 returns 0 listings on a category you know is busy, that is the first thing to check —
 open the page, and look at whether `li.s-card` still matches.
 
-**Every Wheelhouse category is offered; the classifier prompt is still footwear-shaped.**
-The dropdown is fetched from `GET /api/ebay/categories`, so all twenty-four appear —
-it used to list two, hardcoded, and stayed that way while Wheelhouse grew around it.
+**Every Wheelhouse category is offered; the prompt shipped with it is still
+footwear-shaped.** The dropdown is fetched from `GET /api/ebay/categories`, so all
+twenty-four appear — it used to list two, hardcoded, and stayed that way while Wheelhouse
+grew around it.
 
-What has not caught up is the wording Wheelhouse classifies with. Its prompt asks whether
-a brand's *footwear* carries resale value, which is the right question for the four shoe
-and boot categories and the wrong one for shirts or jeans. Reading clothing in will work,
-but the tier it comes back with was decided by a question about shoes.
+What has not caught up is the wording in `server/src/lib/brand-prompt.ts`, which asks
+whether a brand's *footwear* carries resale value. That is the right question for the four
+shoe and boot categories and the wrong one for shirts or jeans. Nothing enforces it any
+more — Wheelhouse no longer sends that prompt anywhere, it only prints it for you — so
+classifying clothing is a matter of editing the wording, or ignoring it and writing the
+brands yourself.
 
 ### Checking the selectors
 

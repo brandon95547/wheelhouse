@@ -19,8 +19,9 @@
  * This reverses an earlier reading of the same two words, under which rare meant only
  * "the label alone is the signal" and explicitly did NOT mean expensive. That version
  * pushed brands like HOKA and Ariat into common, where the row then had to name models
- * to justify a brand that is worth grabbing on sight. The tiers still mean what the
- * classifier prompt in brand-ai.ts says they mean; keep the two in step.
+ * to justify a brand that is worth grabbing on sight. The tiers mean the same thing here
+ * and in the prompt in brand-prompt.ts, which is what a pasted classification is written
+ * against; keep the two in step.
  *
  * THEREFORE: A COMMON BRAND WITHOUT A `look_for` IS A BUG, NOT A ROW. A common brand
  * that cannot say what to look for is indistinguishable from a famous name, and telling
