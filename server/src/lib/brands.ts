@@ -1,19 +1,26 @@
 /**
  * The brand book: what to look for, and which models within a common brand are worth it.
  *
- * Two tiers, and the line between them is about WHERE THE PICKUP SIGNAL LIVES:
+ * Two tiers, and the line between them is WHETHER THE BRAND CARRIES VALUE ON ITS OWN:
  *
- *   rare    the brand itself is the signal. Seeing the label is reason enough to pick
- *           the item up — Alden, Grant Stone, Viberg. Nothing else needs to be true.
- *   common  the specific model is the signal. The label is everywhere and worthless by
- *           default; only certain models, lines, materials, vintages, collaborations or
- *           limited editions pay — Nike, Adidas, New Balance.
+ *   rare    the brand generally sells for real money, so the label is worth knowing on
+ *           sight — Birkenstock, HOKA, Danner, Salomon, Gucci. Not every model has to
+ *           pay for this to be true.
+ *   common  the brand as a whole does not clear that bar, but particular models, lines,
+ *           collaborations, vintages or materials do — Nike, New Balance, Converse.
  *
  * and `unsorted` for anything an import turned up that no guide has judged yet.
  *
- * RARE IS NOT A COMPLIMENT. It does not mean expensive, famous, or capable of having
- * valuable models. If only certain models of a brand are worth buying, that brand is
- * common no matter how prestigious the name.
+ * "RARE" MEANS VALUABLE, NOT SCARCE, and it is not about fame either. The question is
+ * whether a reseller should recognise the brand itself while sourcing. A brand can be
+ * everywhere and still be rare — Birkenstock is not hard to find — and a prestigious
+ * name whose value lives entirely in specific models is common, not rare.
+ *
+ * This reverses an earlier reading of the same two words, under which rare meant only
+ * "the label alone is the signal" and explicitly did NOT mean expensive. That version
+ * pushed brands like HOKA and Ariat into common, where the row then had to name models
+ * to justify a brand that is worth grabbing on sight. The tiers still mean what the
+ * classifier prompt in brand-ai.ts says they mean; keep the two in step.
  *
  * THEREFORE: A COMMON BRAND WITHOUT A `look_for` IS A BUG, NOT A ROW. A common brand
  * that cannot say what to look for is indistinguishable from a famous name, and telling

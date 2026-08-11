@@ -79,41 +79,52 @@ const MAX_PER_CALL = 250;
 /** Exported so the prompt can be dumped and run by hand without transcribing it. */
 export const SYSTEM = `Analyze these eBay SOLD listings and identify every brand represented.
 
-Classify each brand based primarily on your existing knowledge of the brand and the resale market. Use the sold listings as additional evidence to help identify valuable models, lines, and patterns.
-
-The sold listings are examples of what sold. They are NOT necessarily representative of the entire brand and should not override established resale knowledge.
+Classify each brand using your existing knowledge of the brand and the resale market. Use the sold listings as supporting evidence, not as the sole basis for classification.
 
 Classify every brand as:
 
 ### RARE
 
-The BRAND itself is the pickup signal.
+The brand itself has meaningful resale value.
 
-If seeing the brand name at a thrift store would normally make an experienced reseller stop and inspect the item, classify it as Rare.
+If the brand's footwear normally sells for enough money that an experienced reseller should recognize the brand as a valuable brand to source, classify it as Rare.
 
-Rare does NOT mean every item from the brand sells for a high price. Different models can still perform differently.
+The brand does NOT need to be literally rare or uncommon.
 
-The question is simply:
+Not every model has to be valuable.
 
-**Is this brand itself strong enough in the resale market that the brand name alone makes the item worth inspecting?**
+If the brand generally produces footwear with strong resale value, the brand belongs in Rare.
 
-If yes → Rare.
+Examples:
+
+Birkenstock → Rare
+Ariat → Rare
+HOKA → Rare
+On Running → Rare
+Danner → Rare
+Salomon → Rare
+RM Williams → Rare
+Wesco → Rare
+Gucci → Rare
+Christian Louboutin → Rare
 
 ### COMMON
 
-The BRAND itself is not enough to make the item worth picking up or inspecting.
+The brand as a whole does not have consistently strong enough resale value to qualify as Rare, but specific models, lines, collaborations, vintage versions, materials, or special variants are worth sourcing.
 
-However, specific models, lines, materials, vintage versions, collaborations, or special variants are worth looking for.
+Examples:
 
-If the reseller needs to know WHICH MODEL it is before the brand becomes interesting:
+Nike → Common. Nike has many valuable shoes, but value varies enormously by model. Specific models such as Kobe, desirable Air Max, Dunk, SB, collaborations, and limited releases are what the reseller needs to recognize.
 
-→ Common.
+New Balance → Common. Certain models and collaborations can be excellent, but ordinary New Balance footwear does not automatically have strong resale value.
 
-For every Common brand, provide exactly what to look for.
+Converse → Common. Specific vintage, premium, collaboration, and collectible models matter more than the brand alone.
+
+For every Common brand, populate \`lookFor\` with exactly which models or versions are worth sourcing.
 
 ### NOT WORTHY
 
-The brand itself is not worth intentionally sourcing AND there are no meaningful models or versions worth specifically looking for.
+The brand does not generally have meaningful resale value and there are no important models or versions worth specifically learning to source.
 
 ### UNSORTED
 
@@ -121,36 +132,40 @@ Use only when you genuinely do not know enough about the brand to classify it.
 
 ### CORE RULE
 
-Do NOT ask:
+Ask:
 
-"Is every item from this brand valuable?"
-
-Instead ask:
-
-**"If I saw this brand while sourcing at a thrift store, would the BRAND NAME ALONE make me stop and inspect the item?"**
+**"Is this a footwear brand that is generally valuable enough in the resale market that I should know and recognize the brand itself while sourcing?"**
 
 YES → RARE
 
-NO, but specific models are worth looking for → COMMON
+NO, but specific models or versions are valuable → COMMON
 
-NO, and there are no meaningful models worth looking for → NOT WORTHY
+NO, and there are no meaningful models or versions to target → NOT WORTHY
 
-I don't know enough about the brand → UNSORTED
+I genuinely don't know enough about the brand → UNSORTED
 
-Use your existing resale-market knowledge to make this decision.
+Do not classify based on how famous, common, or physically rare a brand is.
 
-Use the supplied sold listings to SUPPORT the decision and identify models — not as the sole definition of the brand.
+"Rare" means **valuable resale brand**, not literally scarce.
+
+Use your existing resale-market knowledge to make the classification.
+
+Use the supplied sold listings to support the decision and identify models, not to define the entire brand.
 
 ### THE MODEL OF EACH ITEM
 
-Separately from the brand verdicts, identify what EACH numbered listing actually is.
+Separately from the brand classifications, identify what EACH numbered listing actually is.
 
-Every listing gets one entry, using the number it was given.
+Every listing gets one entry using its original number.
 
-- \`brand\` — the brand that made it, spelled the same way you spelled it above.
-- \`model\` — the specific model, line or silhouette: "Air Max 90", "2002R", "1460", "Ghost Max". Strip the size, the colourway, the condition and the SKU. Return null if the title names no readable model.
+* \`brand\` — the brand that made it, spelled the same way as in the brand classifications.
+* \`model\` — the specific model, line, or silhouette, such as "Air Max 90", "2002R", "1460", "Ghost Max", or "Bondi 8".
 
-Do this for EVERY brand in EVERY tier, Rare and Common alike. A Rare brand's models matter just as much as a Common brand's.
+Strip size, colorway, condition, gender, and SKU from the model.
+
+Return null if the listing title does not provide a readable model.
+
+Do this for EVERY item in EVERY tier.
 
 Return JSON only:
 
@@ -164,14 +179,23 @@ Return JSON only:
 }
 ],
 "items": [
-{ "i": 0, "brand": "Brand Name", "model": "Model Name" },
-{ "i": 1, "brand": "Brand Name", "model": null }
+{
+"i": 0,
+"brand": "Brand Name",
+"model": "Model Name"
+}
 ]
 }
 
 For Common brands, always populate \`lookFor\`.
 
-Keep reasoning short.`;
+For Rare, Not Worthy, and Unsorted brands, \`lookFor\` should be null.
+
+Keep reasoning short.
+
+Every brand must appear exactly once.
+
+Every numbered listing must appear exactly once.`;
 
 interface RawVerdict {
   name?: unknown;

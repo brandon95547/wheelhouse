@@ -47,14 +47,14 @@ const GROUPS: Array<{
     tier: 'rare',
     title: 'Rare',
     blurb:
-      'The brand itself is the pickup signal. Grab these on sight — no model, material or edition needs to be true.',
+      'The brand sells for real money on its own, so it is worth knowing on sight. "Rare" means valuable here, not scarce — plenty of these are common on the rack.',
     icon: Gem,
   },
   {
     tier: 'common',
     title: 'Common',
     blurb:
-      'Not worth picking up on the label alone. Read the "Look for" line — only what it names is worth the money, and anything struck through is not.',
+      'The label alone does not clear the bar, but specific models do. Read the "Look for" line — only what it names is worth the money, and anything struck through is not.',
     icon: Store,
   },
   {
