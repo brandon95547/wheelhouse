@@ -76,7 +76,8 @@ export interface AiReading {
  */
 const MAX_PER_CALL = 250;
 
-const SYSTEM = `Analyze these eBay SOLD listings and identify every brand represented.
+/** Exported so the prompt can be dumped and run by hand without transcribing it. */
+export const SYSTEM = `Analyze these eBay SOLD listings and identify every brand represented.
 
 Classify each brand based primarily on your existing knowledge of the brand and the resale market. Use the sold listings as additional evidence to help identify valuable models, lines, and patterns.
 
