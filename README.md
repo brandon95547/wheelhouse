@@ -88,6 +88,7 @@ the browser extension.
 | `server` | `npm run typecheck` | TypeScript check, no output |
 | `server` | `npm run db:init` | Create the database and seed configuration |
 | `server` | `npm run db:reset` | Delete all business records |
+| `server` | `npx tsx src/scripts/dump-prompt.ts <category>` | Print the classifier prompt for review — see below |
 | `client` | `npm run dev` | Vite dev server on port 5173 |
 | `client` | `npm run build` | Type check, then production build |
 | `client` | `npm run preview` | Serve the production build |
@@ -131,6 +132,29 @@ lead, project or eBay research category. Click a tag to filter by it.
 **eBay Research** — category selector, a button that opens eBay's sold listings
 in a new tab, count / average / median / lowest / highest sold price, and a
 table of everything imported.
+
+**Brand book** — what to look for, built from what has actually sold. Organised
+as **category → brand → model**: a brand is judged inside one category, so Nike
+under Men's Shoes and Nike under Men's Shirts are separate rows with separate
+tiers and separate models. Brands are Rare (the label alone is the pickup
+signal), Common (only certain models pay, and the row must say which), Unsorted
+or Not worth it.
+
+Who may change what:
+
+| | Create a brand | Change an existing brand's tier | Add a model |
+| --- | --- | --- | --- |
+| Classifier | yes, if new to the category | **never** | yes, any brand, any tier |
+| You | — | yes, in the Brand Book | yes |
+
+The classifier is a seeker, not an editor. It reads a scan, files brands it has
+not seen before, records what each listing is (its brand and its model), and
+adds models it finds. It cannot revise a brand already in the book — there is no
+UPDATE for `tier` or `look_for` on that path, so no flag or later edit can
+restore one. Moving a brand between tiers is yours alone.
+
+The Report page still scores every brand against its sold prices and says where
+the numbers disagree with the book, but it no longer applies anything.
 
 **Settings** — theme (light, dark or system), the backend URL to paste into the
 extension, application information, and a guarded "clear all data" action.
@@ -251,13 +275,72 @@ return `400` with `{ "error": "Validation failed", "details": [{ "field", "messa
 `leads`, `contacts`, `referral_partners`, `projects`, `events`, `notes`,
 `ebay_listings` — all empty until you add something.
 
+`ebay_brands`, `ebay_brand_models` — the brand book, built by the classifier and
+corrected by you. `ebay_brands` is unique on `(category_id, slug)` rather than
+on `slug` alone, which is what keeps one book per category. Models hang off
+`brand_id` and inherit their category through it. Each listing carries the
+`brand_id` and `model_id` it was identified as, so a model's sold count and
+median come from the sales that actually bore it.
+
 `ebay_categories`, `option_values` — configuration, seeded at migration time.
+
+The database runs in WAL mode. **Copying `wheelhouse.db` on its own loses
+everything still in the `-wal` sidecar**, and the stale copy opens without
+complaint, so back it up with `VACUUM INTO '<dest>'` or copy all three of
+`wheelhouse.db`, `wheelhouse.db-wal` and `wheelhouse.db-shm`.
 
 ### eBay categories
 
 Media: Books, DVDs, VHS Tapes.
-Men: Shirts, Jeans, Jackets, Shoes, Boots.
-Women: Shirts, Jeans, Jackets, Shoes, Boots.
+Men: Shoes, Boots.
+Women: Shoes, Boots.
+Men's Clothing: Activewear, Coats/Jackets & Vests, Jeans/Pants, Shirts, Shorts,
+Suits & Blazers, Sweaters, Vintage T-Shirts.
+Women's Clothing: Activewear, Coats/Jackets & Vests, Dresses, Jeans/Pants,
+Shorts, Skirts, Suits & Blazers, Sweaters, Tops.
+
+Seeded on every boot. A seeded category that is no longer listed is retired
+automatically, but **only when it holds no listings and no brands** — a category
+with data in it is never removed.
+
+Footwear stays under the plain `Men` / `Women` groups rather than moving to
+`Men's Clothing`. The group and the name together make the slug, so renaming the
+group would orphan every listing and brand already filed under `men-shoes`.
+
+---
+
+## Reviewing the classifier prompt
+
+The prompt sent to the model is worth reading before you trust what comes back.
+Print the exact one for a category:
+
+```bash
+cd server
+npx tsx src/scripts/dump-prompt.ts men-shoes          # to the terminal
+npx tsx src/scripts/dump-prompt.ts men-shoes > /tmp/prompt.txt   # to a file
+```
+
+The category argument is a slug (`men-shoes`, `mens-clothing-shirts`, …);
+`men-shoes` is the default, and an unknown one prints the list of valid slugs.
+A header line with the category and listing count goes to stderr, so the
+redirect above captures only the prompt itself.
+
+Output is the two messages joined by a `---` line: the system prompt above it,
+the numbered sold listings below. To run it by hand in a chat window, paste the
+whole thing as one message — a chat window has no system role, which is why the
+separator is there.
+
+Two differences to expect when comparing a hand-run against the app:
+
+- the app sends the halves as real `system` and `user` messages with
+  `response_format: json_object` forced, so a chat window may wrap the JSON in
+  prose that the app would never see;
+- the app uses whatever `OPENAI_MODEL` names (default `gpt-5-nano`), which is a
+  much smaller model than the one behind a chat window — better output by hand
+  does not mean the prompt is fine.
+
+The script imports `SYSTEM` from `server/src/lib/brand-ai.ts` rather than
+restating it, so what it prints is always what the app actually sends.
 
 ---
 
