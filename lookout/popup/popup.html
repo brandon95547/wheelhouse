@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Lookout</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header class="head">
+    <h1>Lookout</h1>
+    <p class="sub">Reads the eBay page you have open. Never opens hidden tabs.</p>
+  </header>
+
+  <!-- Step 1. Where the listings on screen should land in Wheelhouse. -->
+  <section class="panel">
+    <p class="step"><b>1</b> Send these to</p>
+    <label class="label" for="category">Wheelhouse category</label>
+    <select id="category" class="input"></select>
+    <p class="hint note">
+      Lookout reads the eBay page you already have open. It does not open searches for
+      you — loading a freshly built search URL is what triggers eBay’s verification
+      check. Get the sold listings on screen yourself, then read them.
+    </p>
+  </section>
+
+  <!-- Step 2. Read what is on screen. -->
+  <section class="panel">
+    <p class="step"><b>2</b> Read the page</p>
+    <div class="actions">
+      <button id="scan" class="btn btn-primary" type="button">Read this page</button>
+      <button id="cancel" class="btn btn-ghost" type="button" hidden>Stop</button>
+    </div>
+    <label class="check">
+      <input id="follow" type="checkbox" />
+      <span>Turn pages for me <span class="hint">moves this tab; you watch</span></span>
+    </label>
+
+    <details class="tune">
+      <summary>Filters</summary>
+      <label class="label" for="terms">Search terms <span class="hint">eBay <code>_nkw</code></span></label>
+      <input id="terms" class="input" type="text" placeholder="defaults per category" />
+      <div class="row">
+        <div>
+          <label class="label" for="minPrice">Sold over</label>
+          <input id="minPrice" class="input" type="number" min="0" step="5" value="40" />
+        </div>
+        <div>
+          <label class="label" for="maxPages">Follow pages</label>
+          <input id="maxPages" class="input" type="number" min="1" max="20" value="5" />
+        </div>
+      </div>
+      <label class="check">
+        <input id="usedOnly" type="checkbox" checked />
+        <span>Pre-owned only</span>
+      </label>
+      <div class="pin">
+        <span id="pinState" class="hint">No eBay category pinned.</span>
+        <button id="pin" class="btn btn-ghost btn-sm" type="button">Pin this category</button>
+      </div>
+    </details>
+  </section>
+
+  <section id="progress" class="panel" hidden>
+    <div class="bar"><div id="barFill" class="bar-fill"></div></div>
+    <p id="progressText" class="hint"></p>
+    <div class="tally">
+      <span class="pill pill-good"><b id="tallyWorthy">0</b> worthy</span>
+      <span class="pill"><b id="tallyMissing">0</b> wrong model</span>
+      <span class="pill"><b id="tallyUnlisted">0</b> unlisted</span>
+    </div>
+  </section>
+
+  <section id="warnings" class="panel warn" hidden></section>
+
+  <!-- Step 3. Send it. -->
+  <section id="results" class="panel" hidden>
+    <div class="results-head">
+      <p class="step"><b>3</b> Worth sourcing</p>
+      <button id="send" class="btn btn-primary btn-sm" type="button">Send to Wheelhouse</button>
+    </div>
+    <ul id="brandList" class="brands"></ul>
+
+    <details id="candidatesBox" hidden>
+      <summary>Not in your guide yet <span id="candidateCount" class="hint"></span></summary>
+      <p class="hint">Repeat sellers the guide does not list. Evidence for the next revision — not a buy list.</p>
+      <ul id="candidateList" class="brands"></ul>
+    </details>
+  </section>
+
+  <footer class="foot">
+    <label class="label" for="wheelhouseUrl">Wheelhouse</label>
+    <input id="wheelhouseUrl" class="input" type="text" value="http://localhost:4000" />
+  </footer>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

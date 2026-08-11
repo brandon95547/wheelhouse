@@ -1,0 +1,146 @@
+/* Flat UI Colors 2, the same dark system Wheelhouse uses, so the extension reads as
+   part of the app rather than a bolted-on tool. Values are the palette's own: Midnight
+   Blue page, Wet Asphalt surface, Turquoise primary with a dark ink — the ink matters,
+   because white on Turquoise is 2.4:1 and unreadable. */
+:root {
+  --bg: #273746;
+  --surface: #2c3c4d;
+  --elevated: #3d566e;
+  --outline: #95a5a6;
+  --divider: #4a657f;
+  --text: #ecf0f1;
+  --text-dim: #d7dada;
+  --muted: #c3c8c8;
+  --primary: #1abc9c;
+  --primary-hover: #16a085;
+  --on-primary: #10212e;
+  --good: #97d3c1;
+  --warn: #f1c40f;
+  --danger: #f2bbb9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  width: 380px;
+  max-height: 600px;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.5 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+.head { padding: 14px 16px 6px; }
+h1 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
+h2 { margin: 0; font-size: 13px; }
+.sub, .hint { color: var(--muted); font-size: 11px; margin: 2px 0 0; }
+.hint { font-weight: 400; }
+code { font-size: 10px; opacity: 0.8; }
+
+.panel {
+  margin: 8px 12px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--divider);
+  border-radius: 10px;
+}
+
+.label {
+  display: block;
+  margin: 10px 0 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+.label:first-child { margin-top: 0; }
+
+.input, .select {
+  width: 100%;
+  padding: 7px 9px;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--outline);
+  border-radius: 7px;
+  font: inherit;
+}
+.input:focus, .select:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.check { display: flex; align-items: center; gap: 7px; margin-top: 10px; font-size: 12px; }
+.check input { accent-color: var(--primary); }
+
+.pin {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--divider);
+}
+
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+
+.btn {
+  flex: 1;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.12s;
+}
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn-primary { background: var(--primary); color: var(--on-primary); }
+.btn-primary:hover:not(:disabled) { background: var(--primary-hover); }
+.btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--outline); }
+.btn-ghost:hover:not(:disabled) { background: var(--elevated); }
+.btn-sm { flex: 0 0 auto; padding: 5px 10px; font-size: 11px; }
+
+.bar { height: 5px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; width: 0; background: var(--primary); transition: width 0.25s; }
+
+.tally { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+.pill {
+  padding: 2px 8px; border-radius: 99px; font-size: 11px;
+  background: var(--elevated); color: var(--text-dim);
+}
+.pill b { color: var(--text); }
+.pill-good { background: #306f6f; color: #cfe9e0; }
+.pill-good b { color: #cfe9e0; }
+
+.warn { border-color: var(--warn); color: #f9e7c4; background: #706857; font-size: 12px; }
+.warn p { margin: 0 0 6px; }
+.warn p:last-child { margin-bottom: 0; }
+
+.results-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+
+.brands { list-style: none; margin: 0; padding: 0; }
+.brands li { padding: 8px 0; border-top: 1px solid var(--divider); }
+.brands li:first-child { border-top: 0; }
+
+.brand-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.brand-name { font-weight: 600; }
+.brand-price { color: var(--good); font-variant-numeric: tabular-nums; font-weight: 600; }
+.brand-meta { color: var(--muted); font-size: 11px; margin-top: 2px; }
+.tag {
+  display: inline-block; margin: 3px 3px 0 0; padding: 1px 6px;
+  border-radius: 4px; font-size: 10px; background: var(--elevated); color: var(--text-dim);
+}
+.tag-master { background: #306f6f; color: #cfe9e0; }
+
+details { margin-top: 10px; border-top: 1px solid var(--divider); padding-top: 8px; }
+summary { cursor: pointer; font-size: 12px; font-weight: 600; }
+
+.foot { padding: 4px 16px 16px; }
+
+.note { margin: 10px 0 0; line-height: 1.45; }
+
+.step { margin: 0 0 8px; font-size: 12px; color: var(--text-dim); font-weight: 600; }
+.step b {
+  display: inline-grid; place-items: center; width: 17px; height: 17px; margin-right: 6px;
+  border-radius: 50%; background: var(--elevated); color: var(--text); font-size: 10px;
+}
+.opens { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.opens .btn { flex: initial; padding: 7px 6px; font-size: 12px; }
+.open.is-active { border-color: var(--primary); color: var(--primary); }
+.tune { margin-top: 12px; }
+.tune .label:first-child { margin-top: 8px; }

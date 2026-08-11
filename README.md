@@ -17,7 +17,7 @@ category names and the status lists the forms offer.
 wheelhouse/
   client/             React + TypeScript + Vite + Tailwind CSS front end
   server/             Express + SQLite REST API
-  browser-extension/  Chrome Manifest V3 extension that imports eBay listings
+  lookout/            Chrome Manifest V3 extension that reads eBay sold listings
   README.md
 ```
 
@@ -161,49 +161,62 @@ extension, application information, and a guarded "clear all data" action.
 
 ---
 
-## Browser extension
+## Browser extension — Lookout
+
+`lookout/` is the extension, and the only one. An earlier, simpler importer lived
+in `browser-extension/` and was replaced by this; it was deleted rather than left
+to rot, because two extensions in one repo is one too many to keep straight. See
+`lookout/README.md` for how it decides what is worth sourcing, and for eBay's
+crawling policy — which is worth reading before turning on page-following.
 
 ### Load it in Chrome
 
 1. Open `chrome://extensions`.
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked**.
-4. Select the `wheelhouse/browser-extension` folder.
+4. Select the `wheelhouse/lookout` folder.
 5. Pin the extension so its icon is visible.
-6. Click the icon, open **Settings** inside the popup, and set the backend URL
-   to wherever the Wheelhouse server is running — `http://localhost:4000` by
-   default. `localhost` and `127.0.0.1` are pre-authorised; any other address
-   triggers a one-time Chrome permission prompt.
+6. Set **Wheelhouse** at the bottom of the popup to wherever the server is
+   running — `http://localhost:4000` by default.
 
-### Test an import
+Reload the extension from `chrome://extensions` after pulling; Chrome keeps
+running the copy it loaded.
+
+### Read a page
 
 1. Start the Wheelhouse server (`cd server && npm run dev`).
-2. In Wheelhouse, open **eBay Research**, pick a category, type something to
-   search for, and click **Open eBay**. (Or browse eBay yourself and apply the
-   **Sold Items** filter.)
-3. Wait for the results to render, and scroll so the listings you want are
-   loaded — the extension reads what is on the page.
-4. Click the Wheelhouse extension icon. The popup reports how many listings it
-   found and which layout it recognised.
-5. Choose a Wheelhouse category and click **Import to Wheelhouse**.
-6. The popup shows found / imported / duplicates / failed, and lists anything
-   that failed validation.
-7. Back in Wheelhouse, refresh the eBay Research page to see the listings and
-   the price statistics.
+2. Open eBay yourself and apply the **Sold Items** filter. Lookout reads the page
+   you already have open — it does not open searches for you, because loading a
+   freshly built search URL is what trips eBay's verification check.
+3. Pick the **Wheelhouse category** the results belong to. This is the one
+   setting worth slowing down for: the brand book is kept per category, so
+   reading shoes into the shirts category does not merely mis-file rows, it
+   teaches the wrong book.
+4. Click **Read this page**.
+5. Click **Send to Wheelhouse**.
 
-Import the same page twice and everything is reported as duplicates — nothing is
+The category dropdown is fetched live from `GET /api/ebay/categories`, so it is
+whatever the database currently holds. A hardcoded copy in `popup/popup.js` is
+used only when the server cannot be reached, and it is stale by definition.
+
+Read the same page twice and everything is reported as duplicates — nothing is
 stored twice.
 
 ### What the extension does and does not do
 
-It reads the listing cards on the page you are already looking at, only when you
-click it. It does not sign in to eBay, store eBay credentials, read or export
-cookies, crawl eBay, change pages, bypass CAPTCHAs, hide activity or attempt to
-evade detection. It has no background page and no automatic scanning.
+It reads the listing cards on the page you are already looking at. It does not
+sign in to eBay, store eBay credentials, read or export cookies, bypass CAPTCHAs,
+hide activity or attempt to evade detection.
 
-Permissions: `activeTab` (read the current tab, granted only when you click the
-extension), `scripting`, `storage`, and host access to `localhost` /
-`127.0.0.1` so the popup can post to Wheelhouse.
+It *can* turn pages for you, and that is off by default. With **Turn pages for
+me** ticked it navigates the tab you are watching, at a jittered pace, with a
+daily page budget and a 30-minute cooldown after any verification challenge.
+That is automated navigation of eBay search, which their `robots.txt` prohibits
+regardless of pacing — `lookout/README.md` quotes it in full. The default mode
+does not navigate at all.
+
+Permissions: `scripting`, `storage`, `tabs`, and host access to `www.ebay.com`
+plus `localhost` / `127.0.0.1` so it can post to Wheelhouse.
 
 ### Duplicate handling
 
@@ -220,9 +233,9 @@ each failure.
 
 ### Updating the eBay parser
 
-All eBay-specific knowledge lives in **`browser-extension/content/parser.js`**.
-Nothing else in the extension or in Wheelhouse needs to change when eBay changes
-its markup.
+All eBay-specific knowledge lives in **`lookout/content/parser.js`**. Nothing
+else in the extension or in Wheelhouse needs to change when eBay changes its
+markup.
 
 The file defines one strategy per page layout — current search cards
 (`li.s-card`), legacy search cards (`li.s-item`), and Seller Hub Product
