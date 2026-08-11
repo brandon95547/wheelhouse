@@ -221,7 +221,7 @@ export function SettingsPage() {
 
         <Section
           title="Application data"
-          description="Remove every lead, contact, partner, project, event, note and imported eBay listing. Category and status configuration is kept."
+          description="Remove every lead, contact, partner, project, event, note, imported eBay listing and the entire brand book. Category and status configuration is kept, so the app still works and the next import starts clean."
         >
           <button
             type="button"
@@ -237,7 +237,7 @@ export function SettingsPage() {
       <ConfirmDialog
         open={confirmClear}
         title="Clear all application data"
-        message="This permanently deletes every lead, contact, referral partner, project, event, note and imported eBay listing. This cannot be undone."
+        message="This permanently deletes every lead, contact, referral partner, project, event, note and imported eBay listing, along with every brand and model in the brand book — including locked brands. This cannot be undone."
         confirmLabel="Delete everything"
         onConfirm={clearAllData}
         onCancel={() => setConfirmClear(false)}

@@ -334,9 +334,25 @@ export function getOptions(): Record<string, string[]> {
   return out;
 }
 
-/** Deletes every business record. Configuration tables are left intact. */
+/**
+ * Deletes every business record. Configuration tables are left intact.
+ *
+ * The brand book goes too, and that is deliberate: it is derived data, learned from the
+ * listings above it, so leaving it behind after a wipe would strand judgements whose
+ * evidence no longer exists. It is also the thing you actually want gone when the model
+ * or the prompt behind those judgements has changed.
+ *
+ * Locked brands are included. A lock stops re-scoring and single-row deletion — it is a
+ * standing instruction for the routine case — but this is an explicit, confirmed wipe of
+ * everything, and silently keeping rows back from it would be the worse surprise.
+ *
+ * Order matters: children before parents, so the counts reported are the rows this call
+ * actually removed rather than rows a cascade had already taken.
+ */
 export function clearAllData(): Record<string, number> {
   const tables = [
+    'ebay_brand_models',
+    'ebay_brands',
     'ebay_listings',
     'notes',
     'events',
