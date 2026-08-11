@@ -10,16 +10,20 @@
  * makes a worthless brand with two lucky sales look like a good one, and this page exists
  * to prevent exactly that mistake.
  *
- * Nothing changes until "Apply" is pressed, and locked brands never change at all.
+ * NOTHING ON THIS PAGE MOVES A TIER ANY MORE. The arithmetic still runs and still says
+ * what it thinks, because "why is this rare" deserves an answer with numbers in it — but
+ * a brand already in the book keeps the tier it has until the user changes it in the Brand
+ * Book. What was once an "Apply" button is now a comparison: here is what the sold prices
+ * would say, next to what the book says, and the difference is yours to act on or ignore.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Check, Gem, Lock, RefreshCw, Sparkles, Store, TrendingDown } from 'lucide-react';
 import { EmptyState, ErrorState, LoadingState } from '../../components/ui';
 import { useApi } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
 import { api } from '../../lib/api';
 import { formatMoney } from '../../lib/format';
-import type { BrandAnalysis, BrandProposal } from '../../lib/types';
+import type { BrandAnalysis, BrandProposal, EbayCategory } from '../../lib/types';
 
 const STRENGTH: Record<
   BrandProposal['stats']['strength'],
@@ -58,7 +62,13 @@ interface ClassifyStatus {
   startedAt: string | null;
   finishedAt: string | null;
   listingCount: number;
-  result: { applied: number; created: number; skipped: number; models: number } | null;
+  /** Mirrors ReadingResult on the server. `untouched` is the promise being kept. */
+  result: {
+    created: number;
+    untouched: number;
+    models: number;
+    attributed: number;
+  } | null;
   error: string | null;
   aiConfigured: boolean;
 }
@@ -102,8 +112,23 @@ function useClassifyStatus(onFinish: () => void) {
 
 export function BrandReport() {
   const toast = useToast();
-  const [applying, setApplying] = useState(false);
-  const analysis = useApi<BrandAnalysis>('/ebay/brands/analysis');
+  /* Classification runs against ONE category, and there is no "all". A brand is judged
+     inside a category, so a run across every category at once would have to decide which
+     book each brand belongs to — the guess the whole design exists to avoid. Empty until
+     chosen, so the button cannot fire against a category nobody picked. */
+  const [category, setCategory] = useState('');
+  const { data: categories } = useApi<EbayCategory[]>('/ebay/categories');
+  const analysis = useApi<BrandAnalysis>('/ebay/brands/analysis', { category: category || 'all' });
+
+  const categoryGroups = useMemo(() => {
+    const groups = new Map<string, EbayCategory[]>();
+    for (const item of categories ?? []) {
+      const list = groups.get(item.group_name) ?? [];
+      list.push(item);
+      groups.set(item.group_name, list);
+    }
+    return [...groups.entries()];
+  }, [categories]);
 
   const onFinish = useCallback(() => {
     analysis.reload();
@@ -113,27 +138,19 @@ export function BrandReport() {
   const { status, setStatus } = useClassifyStatus(onFinish);
 
   async function classify() {
+    if (!category) {
+      toast.error('Choose which category to classify first.');
+      return;
+    }
     try {
-      const next = await api.post<ClassifyStatus & { message: string }>('/ebay/brands/classify');
+      const next = await api.post<ClassifyStatus & { message: string }>(
+        '/ebay/brands/classify',
+        { category },
+      );
       setStatus(next);
       toast.success(next.message);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Could not start classification.');
-    }
-  }
-
-  async function apply() {
-    setApplying(true);
-    try {
-      const result = await api.post<{ applied: number; skipped: number; message: string }>(
-        '/ebay/brands/rescore',
-      );
-      toast.success(result.message);
-      analysis.reload();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not apply the analysis.');
-    } finally {
-      setApplying(false);
     }
   }
 
@@ -144,12 +161,33 @@ export function BrandReport() {
     <section className="card p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
         <div className="min-w-0">
-          <h2 className="text-sm font-semibold text-on-surface">Classify brands from your listings</h2>
+          <h2 className="text-sm font-semibold text-on-surface">Read brands and models from your listings</h2>
           <p className="mt-1 text-xs text-on-surface-muted">
-            Reads every imported sold listing and sorts the brands into Rare, Common and Not
-            worth it. Runs over everything you have imported, not just the last scan, so you
-            can rebuild the book at any time without re-scanning eBay. Takes about a minute.
+            Reads every imported sold listing in one category and records what each one is —
+            its brand, and its model. A brand that is new to the category is filed with a
+            starting tier; a brand already in the book keeps the tier you gave it, always.
+            New models are added under both. Takes about a minute.
           </p>
+          <label className="sr-only" htmlFor="classify-category">
+            Category to classify
+          </label>
+          <select
+            id="classify-category"
+            className="select mt-2 w-full sm:w-64"
+            value={category}
+            onChange={(event) => setCategory(event.target.value)}
+          >
+            <option value="">— Choose a category —</option>
+            {categoryGroups.map(([group, items]) => (
+              <optgroup key={group} label={group}>
+                {items.map((item) => (
+                  <option key={item.slug} value={item.slug}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
           {status?.running ? (
             <p className="mt-2 flex items-center gap-2 text-xs text-on-surface">
               <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
@@ -161,10 +199,16 @@ export function BrandReport() {
               {status.error}
             </p>
           ) : status?.result ? (
+            /* "Left as they were" is stated rather than implied. It is the whole promise of
+               this button — that running it cannot undo a tier you set — and a count that
+               only mentioned what changed would leave the user guessing. */
             <p className="mt-2 text-xs text-on-surface-muted">
-              Last run: {status.result.applied} brand{status.result.applied === 1 ? '' : 's'} filed
-              ({status.result.created} new, {status.result.models} models
-              {status.result.skipped ? `, ${status.result.skipped} left alone` : ''}).
+              Last run: {status.result.created} new brand
+              {status.result.created === 1 ? '' : 's'}, {status.result.models} new model
+              {status.result.models === 1 ? '' : 's'}, {status.result.attributed} listing
+              {status.result.attributed === 1 ? '' : 's'} identified.{' '}
+              {status.result.untouched} brand{status.result.untouched === 1 ? '' : 's'} already
+              in the book were left exactly as they were.
             </p>
           ) : null}
         </div>
@@ -234,19 +278,15 @@ export function BrandReport() {
               with fewer than {gates.minSample} sales are left alone.
             </p>
           </div>
-          <button
-            type="button"
-            className="btn btn-primary shrink-0 sm:ml-auto"
-            onClick={apply}
-            disabled={applying || counts.changed === 0}
-          >
-            <RefreshCw className={`size-4 ${applying ? 'animate-spin' : ''}`} aria-hidden="true" />
-            {applying
-              ? 'Applying…'
-              : counts.changed === 0
-                ? 'Nothing to change'
-                : `Apply ${counts.changed} change${counts.changed === 1 ? '' : 's'}`}
-          </button>
+          {/* No Apply button. This page reports; it does not act. A brand's tier is set
+              once, when the brand is first seen, and changed only by you in the Brand Book
+              — so the useful thing to show here is where the numbers disagree with what the
+              book says, and let you go and decide. */}
+          <p className="shrink-0 text-xs text-on-surface-muted sm:ml-auto sm:max-w-56 sm:text-right">
+            {counts.changed === 0
+              ? 'The sold prices agree with every tier in the book.'
+              : `The sold prices would tier ${counts.changed} brand${counts.changed === 1 ? '' : 's'} differently. Move any you agree with in the Brand Book.`}
+          </p>
         </div>
 
         <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">

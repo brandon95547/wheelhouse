@@ -197,24 +197,15 @@ router.post('/import', (req, res) => {
 
   const duplicates = valid.length - imported + duplicatesInBatch;
 
-  /* New sales are new evidence, so the tiers are settled here rather than waiting for
-     someone to ask. DeepSeek does the judging, because it can read a brand out of a
-     mangled title and the statistics cannot; the scorer stands in only when there is no
-     key at all, so an import never depends on a third party being up. */
-  let rescored = { applied: 0, skipped: 0 };
-
   /* Started, NOT awaited. Classification takes the better part of a minute; waiting for it
      inside the import is what made the extension time out and left the user staring at
      listings with no brands. It also runs whenever the payload had usable listings — not
      only when rows were inserted — because re-scanning the same page dedupes everything
-     and previously skipped classification altogether, leaving no way to retry. */
-  const classifying = valid.length > 0 && aiConfigured() ? startClassification() : false;
+     and previously skipped classification altogether, leaving no way to retry.
 
-  // Only when there is no AI at all. The scorer cannot create brands — it re-tiers rows
-  // that already exist — so it is a safety net, not a substitute.
-  if (imported > 0 && !aiConfigured()) {
-    rescored = applyProposals(analyseBrands());
-  }
+     Scoped to the category being imported into, which is the only book these listings can
+     teach anything about. */
+  const classifying = valid.length > 0 && aiConfigured() ? startClassification(category.id) : false;
 
   res.status(201).json({
     found: rawListings.length,
@@ -222,7 +213,6 @@ router.post('/import', (req, res) => {
     duplicates,
     failed: failed.length,
     errors: failed.slice(0, 25),
-    retiered: rescored.applied,
     // The brand book fills in after this response. Say so, rather than let an empty
     // Brands tab read as a failure.
     classifying,
@@ -232,10 +222,10 @@ router.post('/import', (req, res) => {
         ? `Imported ${imported} listing${imported === 1 ? '' : 's'} into ${category.group_name} / ${category.name}.`
         : 'No new listings — every one was already imported.') +
       (classifying
-        ? ' Classifying brands now; they will appear in the Brands tab shortly.'
+        ? ' Reading brands and models now; they will appear in the Brands tab shortly.'
         : aiConfigured()
           ? ''
-          : ' Brands tiered from sold prices — AI classification unavailable.'),
+          : ' No OPENAI_API_KEY, so no brands were read from this scan.'),
   });
 });
 
@@ -262,8 +252,11 @@ router.post('/import', (req, res) => {
  * Read-only. The evidence is exposed separately from the act of applying it so a tier
  * can always be interrogated — "why is this rare" has an answer with numbers in it.
  */
-router.get('/brands/analysis', (_req, res) => {
-  const proposals = analyseBrands();
+router.get('/brands/analysis', (req, res) => {
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  const proposals = analyseBrands(
+    category && category !== 'all' ? resolveCategory(category).id : undefined,
+  );
   res.json({
     gates: { rare: RARE_GATES, minSample: MIN_SAMPLE },
     // Surfaced so the report can say whether tiers are coming from DeepSeek plus the
@@ -274,8 +267,11 @@ router.get('/brands/analysis', (_req, res) => {
       rare: proposals.filter((p) => p.proposedTier === 'rare').length,
       common: proposals.filter((p) => p.proposedTier === 'common').length,
       unsorted: proposals.filter((p) => p.proposedTier === 'unsorted').length,
-      changed: proposals.filter((p) => p.changed && !p.locked).length,
-      locked: proposals.filter((p) => p.locked).length,
+      /* Brands where the arithmetic and the book disagree. It used to mean "would be
+         changed by pressing Apply", minus the locked ones; nothing is applied any more, so
+         it means what it says — a disagreement worth a look, not a pending action. */
+      changed: proposals.filter((p) => p.changed).length,
+      locked: proposals.length,
     },
   });
 });
@@ -293,10 +289,10 @@ router.post('/brands/classify', (req, res) => {
     ]);
   }
 
-  const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
-  const categoryId = category && category !== 'all' ? resolveCategory(category).id : undefined;
-
-  const started = startClassification(categoryId);
+  /* A category is required, and "all" is no longer accepted. Brands are judged inside one
+     category, so a run across every category at once would have to decide which book a
+     brand belongs to — the exact guess this design exists to avoid. */
+  const started = startClassification(resolveCategory(req.body?.category).id);
   res.status(started ? 202 : 409).json({
     started,
     ...classifyStatus(),
@@ -311,21 +307,39 @@ router.get('/brands/classify', (_req, res) => {
   res.json({ ...classifyStatus(), aiConfigured: aiConfigured() });
 });
 
-/** Re-score every brand and write the tiers the evidence supports. */
-router.post('/brands/rescore', (_req, res) => {
-  const proposals = analyseBrands();
+/**
+ * Re-score every brand — and write nothing.
+ *
+ * The endpoint stays because the client still calls it and because the arithmetic behind
+ * it is still worth reading; what it no longer has is the authority to act on the answer.
+ * Once a brand is in the book its tier is the user's, so the honest response is the count
+ * of brands that were looked at and left exactly as they were. See applyProposals.
+ */
+router.post('/brands/rescore', (req, res) => {
+  const category = typeof req.body?.category === 'string' ? req.body.category.trim() : '';
+  const proposals = analyseBrands(
+    category && category !== 'all' ? resolveCategory(category).id : undefined,
+  );
   const result = applyProposals(proposals);
+  const differ = proposals.filter((p) => p.changed).length;
   res.json({
     ...result,
-    message: `${result.applied} brand${result.applied === 1 ? '' : 's'} re-tiered from sold-price evidence.`,
+    proposals: differ,
+    message: differ
+      ? `${differ} brand${differ === 1 ? '' : 's'} would be tiered differently by the sold prices. None were changed — tiers are yours to move.`
+      : 'The sold prices agree with every tier in the book.',
   });
 });
 
 router.get('/brands', (req, res) => {
   const tier = typeof req.query.tier === 'string' ? req.query.tier : undefined;
   const search = typeof req.query.search === 'string' ? req.query.search.trim() : undefined;
-  const brands = listBrands({ tier, search });
+  const category = typeof req.query.category === 'string' ? req.query.category.trim() : '';
+  const categoryId = category && category !== 'all' ? resolveCategory(category).id : undefined;
+
+  const brands = listBrands({ tier, search, categoryId });
   res.json({
+    category: category && category !== 'all' ? category : 'all',
     brands,
     counts: {
       rare: brands.filter((b) => b.tier === 'rare').length,

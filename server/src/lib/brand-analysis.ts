@@ -21,10 +21,13 @@ import { MAX_PRICE_SAMPLES, median, normaliseBrand, resolveTier } from './brands
 import { nowIso } from './crud.js';
 import { scoreBrand, type BrandStats } from './brand-strength.js';
 import { lookForFromModels, mineModels, type MinedModel } from './model-mining.js';
+import type { AiReading } from './brand-ai.js';
 
 interface ListingRow {
+  id: number;
   title: string;
   sold_price: number | null;
+  brand_id: number | null;
 }
 
 interface BrandRow {
@@ -88,22 +91,44 @@ function titleMatcher(brands: BrandRow[]): (title: string) => BrandRow | null {
  * because attribution missed half its listings looks identical, from the outside, to a
  * brand that genuinely does not sell.
  */
-export function listingsByBrand(): Map<number, ListingRow[]> {
-  const brands = db
-    .prepare(`SELECT ${BRAND_COLUMNS} FROM ebay_brands`)
-    .all() as BrandRow[];
-  const listings = db
-    .prepare('SELECT title, sold_price FROM ebay_listings WHERE sold_price IS NOT NULL')
-    .all() as ListingRow[];
+export function listingsByBrand(categoryId?: number): Map<number, ListingRow[]> {
+  const scope = categoryId ? ' WHERE category_id = ?' : '';
+  const args = categoryId ? [categoryId] : [];
 
+  const brands = db
+    .prepare(`SELECT ${BRAND_COLUMNS} FROM ebay_brands${scope}`)
+    .all(...args) as BrandRow[];
+  const listings = db
+    .prepare(
+      `SELECT id, title, sold_price, brand_id FROM ebay_listings
+        WHERE sold_price IS NOT NULL${categoryId ? ' AND category_id = ?' : ''}`,
+    )
+    .all(...args) as ListingRow[];
+
+  /* Two sources, in this order of trust:
+   *
+   *   brand_id     what the classifier decided this listing IS, stored at import. Exact.
+   *   title match  the fallback, for listings imported before attribution existed or while
+   *                the API was down. It guesses from words in a title, which is why it is
+   *                only consulted when nothing better is on the row.
+   *
+   * Without the fallback a book would read as empty the moment the AI was unavailable,
+   * which is the failure this whole module is built to avoid. */
+  const known = new Set(brands.map((b) => b.id));
   const match = titleMatcher(brands);
   const grouped = new Map<number, ListingRow[]>();
+
   for (const listing of listings) {
-    const brand = match(listing.title);
-    if (!brand) continue;
-    const list = grouped.get(brand.id) ?? [];
+    const brandId =
+      listing.brand_id !== null && known.has(listing.brand_id)
+        ? listing.brand_id
+        : listing.brand_id === null
+          ? (match(listing.title)?.id ?? null)
+          : null;
+    if (brandId === null) continue;
+    const list = grouped.get(brandId) ?? [];
     list.push(listing);
-    grouped.set(brand.id, list);
+    grouped.set(brandId, list);
   }
   return grouped;
 }
@@ -115,11 +140,14 @@ export function listingsByBrand(): Map<number, ListingRow[]> {
  * the one irreversible act in a system built to be corrected, and a brand that sells
  * badly in one category may be the reason someone looks twice in another.
  */
-export function analyseBrands(): BrandProposal[] {
+export function analyseBrands(categoryId?: number): BrandProposal[] {
   const brands = db
-    .prepare(`SELECT ${BRAND_COLUMNS} FROM ebay_brands ORDER BY name COLLATE NOCASE`)
-    .all() as BrandRow[];
-  const grouped = listingsByBrand();
+    .prepare(
+      `SELECT ${BRAND_COLUMNS} FROM ebay_brands
+        ${categoryId ? 'WHERE category_id = ?' : ''} ORDER BY name COLLATE NOCASE`,
+    )
+    .all(...(categoryId ? [categoryId] : [])) as BrandRow[];
+  const grouped = listingsByBrand(categoryId);
 
   return brands.map((brand) => {
     const listings = grouped.get(brand.id) ?? [];
@@ -142,11 +170,11 @@ export function analyseBrands(): BrandProposal[] {
       proposedTier = lookFor ? 'common' : 'unsorted';
     }
 
-    /* Do not touch: an explicit pin, a tier a human set, or one the AI set. The scorer
-       is the fallback for when the AI is unavailable — it fills gaps rather than
-       arbitrating, because it cannot read a model out of a title and the AI can. */
-    const locked =
-      brand.locked === 1 || brand.tier_source === 'manual' || brand.tier_source === 'ai';
+    /* Every brand already in the book is locked against automatic change, whatever set its
+       tier. Once a brand exists, moving it between tiers is the user's decision — so this
+       is now always true, and it stays in the shape of a condition because the UI reads it
+       to explain WHY a proposal was not applied. */
+    const locked = true;
 
     return {
       brandId: brand.id,
@@ -195,8 +223,13 @@ const TIER_RANK: Record<AiVerdictInput['tier'], number> = {
  * in two chunks of a large batch. Both normalise to one slug, so without this the second
  * silently overwrites the first and its models are lost.
  */
-export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
+export function mergeVerdicts(verdicts: AiVerdictInput[]): {
+  verdicts: AiVerdictInput[];
+  /** Slug that was folded away -> the slug it was folded into. */
+  aliasOf: Map<string, string>;
+} {
   const bySlug = new Map<string, AiVerdictInput & { modelSet: Set<string> }>();
+  const aliasOf = new Map<string, string>();
 
   for (const verdict of verdicts) {
     const slug = normaliseBrand(verdict.name);
@@ -205,6 +238,8 @@ export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
     const existing = bySlug.get(slug);
     if (!existing) {
       bySlug.set(slug, { ...verdict, modelSet: new Set(verdict.models) });
+      // Every canonical slug maps to itself, so callers need only one lookup.
+      aliasOf.set(slug, slug);
       continue;
     }
 
@@ -233,12 +268,21 @@ export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
     if (!owner.lookFor && child.lookFor) owner.lookFor = child.lookFor;
     if (TIER_RANK[child.tier] > TIER_RANK[owner.tier]) owner.tier = child.tier;
     bySlug.delete(longer);
+
+    /* Record where it went, and re-point anything already pointing at it. A three-deep
+       fold ("Nike Air Jordan 1" -> "Nike Air Jordan" -> "Nike") must leave every alias
+       aimed at the brand that survived, not at an intermediate row that no longer exists. */
+    aliasOf.set(longer, parent);
+    for (const [from, to] of aliasOf) if (to === longer) aliasOf.set(from, parent);
   }
 
-  return [...bySlug.values()].map(({ modelSet, ...rest }) => ({
-    ...rest,
-    models: [...modelSet].filter((m) => m.length >= 2).slice(0, 20),
-  }));
+  return {
+    verdicts: [...bySlug.values()].map(({ modelSet, ...rest }) => ({
+      ...rest,
+      models: [...modelSet].filter((m) => m.length >= 2).slice(0, 20),
+    })),
+    aliasOf,
+  };
 }
 
 /**
@@ -253,8 +297,8 @@ export function mergeVerdicts(verdicts: AiVerdictInput[]): AiVerdictInput[] {
  * matches is zeroed rather than left holding a stale figure; the AI names brands it knows
  * from the resale market, and some of those legitimately have no sale in this scan.
  */
-export function refreshBrandStats(): number {
-  const grouped = listingsByBrand();
+export function refreshBrandStats(categoryId?: number): number {
+  const grouped = listingsByBrand(categoryId);
   const update = db.prepare(
     `UPDATE ebay_brands
         SET sold_count = @sold_count, median_price = @median_price,
@@ -262,9 +306,25 @@ export function refreshBrandStats(): number {
       WHERE id = @id`,
   );
 
+  /* A model's figures come only from listings that were attributed to it — no title-match
+     fallback, unlike the brand above. A brand can be guessed from a title with reasonable
+     odds; a model cannot, and a median built from guesses would be worse than no median,
+     because it would look exactly as authoritative as a real one. */
+  const updateModel = db.prepare(
+    `UPDATE ebay_brand_models
+        SET sold_count = @sold_count, median_price = @median_price,
+            high_price = @high_price, price_samples = @price_samples
+      WHERE id = @id`,
+  );
+
   let touched = 0;
   db.transaction(() => {
-    const brands = db.prepare('SELECT id FROM ebay_brands').all() as Array<{ id: number }>;
+    const scope = categoryId ? ' WHERE category_id = ?' : '';
+    const args = categoryId ? [categoryId] : [];
+    const brands = db
+      .prepare(`SELECT id FROM ebay_brands${scope}`)
+      .all(...args) as Array<{ id: number }>;
+
     for (const brand of brands) {
       const prices = (grouped.get(brand.id) ?? [])
         .map((l) => l.sold_price)
@@ -278,123 +338,204 @@ export function refreshBrandStats(): number {
       });
       touched += 1;
     }
+
+    const modelPrices = db
+      .prepare(
+        `SELECT m.id, l.sold_price
+           FROM ebay_brand_models m
+           JOIN ebay_brands b ON b.id = m.brand_id
+           LEFT JOIN ebay_listings l
+             ON l.model_id = m.id AND l.sold_price IS NOT NULL
+          ${categoryId ? 'WHERE b.category_id = ?' : ''}`,
+      )
+      .all(...args) as Array<{ id: number; sold_price: number | null }>;
+
+    const byModel = new Map<number, number[]>();
+    for (const row of modelPrices) {
+      const list = byModel.get(row.id) ?? [];
+      if (typeof row.sold_price === 'number' && Number.isFinite(row.sold_price)) {
+        list.push(row.sold_price);
+      }
+      byModel.set(row.id, list);
+    }
+
+    for (const [id, prices] of byModel) {
+      updateModel.run({
+        id,
+        sold_count: prices.length,
+        median_price: median(prices),
+        high_price: prices.length ? Math.max(...prices) : null,
+        price_samples: JSON.stringify(prices.slice(-MAX_PRICE_SAMPLES)),
+      });
+    }
   })();
   return touched;
 }
 
-export function applyAiVerdicts(
-  incoming: AiVerdictInput[],
-): { applied: number; skipped: number; created: number; models: number } {
-  const verdicts = mergeVerdicts(incoming);
+export interface ReadingResult {
+  /** Brands that did not exist in this category and were created. */
+  created: number;
+  /** Brands already in the book. Their tiers were read and discarded. */
+  untouched: number;
+  /** Model rows added. Existing models are never rewritten. */
+  models: number;
+  /** Listings given a brand, a model, or both. */
+  attributed: number;
+}
+
+/**
+ * File a reading into the book. THE ONLY PLACE THE CLASSIFIER MAY WRITE.
+ *
+ * The permissions, which are the point of this function:
+ *
+ *   brands   INSERT ONLY. A brand already in this category keeps the tier it has, full
+ *            stop — not "unless unlocked", not "unless the AI is confident". There is no
+ *            UPDATE statement here for tier or look_for, so there is no path, no flag and
+ *            no future edit that quietly restores one. Moving a brand between tiers is the
+ *            user's decision and the PATCH route is where it happens.
+ *   models   INSERT ONLY. A new model under a known brand is a new fact, and facts are
+ *            what the classifier is trusted with. An existing model keeps its verdict, so
+ *            a model struck through by hand stays struck through.
+ *   listings brand_id and model_id, set once. Everything else about a listing was settled
+ *            at import and is never revisited.
+ *
+ * Scoped to one category throughout. Nike under Men/Shoes and Nike under Men/Shirts are
+ * different rows with different tiers, and nothing here can read across that line.
+ *
+ * `listingIds[i]` is the database id of the listing the reading numbered `i`.
+ */
+export function applyReading(
+  categoryId: number,
+  reading: AiReading,
+  listingIds: Array<number | undefined>,
+): ReadingResult {
+  const { verdicts, aliasOf } = mergeVerdicts(
+    reading.brands.map((b) => ({ name: b.name, tier: b.tier, models: b.models, lookFor: b.lookFor })),
+  );
   const at = nowIso();
-  const select = db.prepare('SELECT id, tier_source, locked FROM ebay_brands WHERE slug = ?');
-  const insert = db.prepare(
-    `INSERT INTO ebay_brands (slug, name, tier, tier_source, look_for, first_seen, last_seen)
-     VALUES (@slug, @name, @tier, 'ai', @look_for, @at, @at)`,
-  );
-  const update = db.prepare(
-    `UPDATE ebay_brands
-        SET tier = @tier, look_for = @look_for, tier_source = 'ai', last_seen = @at
-      WHERE id = @id AND tier_source NOT IN ('manual') AND locked = 0`,
-  );
 
-  /* The models the AI judged worth picking up, stored as rows rather than only as text.
-     Rows are what the brand book can strike through one at a time when a model turns out
-     to be worthless — the text line cannot be corrected that finely.
+  const selectBrand = db.prepare(
+    'SELECT id FROM ebay_brands WHERE category_id = ? AND slug = ?',
+  );
+  const insertBrand = db.prepare(
+    `INSERT INTO ebay_brands (category_id, slug, name, tier, tier_source, look_for, first_seen, last_seen)
+     VALUES (@category_id, @slug, @name, @tier, 'ai', @look_for, @at, @at)`,
+  );
+  // Only ever touches when-last-seen. Nothing a person decided is reachable from here.
+  const touchBrand = db.prepare('UPDATE ebay_brands SET last_seen = @at WHERE id = @id');
 
-     verdict_source 'ai' so a hand-set verdict is recognisable and never overwritten. */
-  const upsertModel = db.prepare(
+  /* Models as rows rather than as a line of text, because rows are what the brand book can
+     strike through one at a time when a model turns out to be worthless.
+
+     DO NOTHING on conflict, not DO UPDATE: an existing model row is already correct, and
+     the verdict on it may have been set by hand. */
+  const insertModel = db.prepare(
     `INSERT INTO ebay_brand_models (brand_id, slug, name, verdict, verdict_source, first_seen, last_seen)
      VALUES (@brand_id, @slug, @name, 'worthy', 'ai', @at, @at)
-     ON CONFLICT(brand_id, slug) DO UPDATE
-       SET name = excluded.name, last_seen = excluded.last_seen
-       WHERE ebay_brand_models.verdict_source <> 'manual'`,
+     ON CONFLICT(brand_id, slug) DO NOTHING`,
+  );
+  const selectModel = db.prepare(
+    'SELECT id FROM ebay_brand_models WHERE brand_id = ? AND slug = ?',
+  );
+  const touchModel = db.prepare('UPDATE ebay_brand_models SET last_seen = @at WHERE id = @id');
+  const linkListing = db.prepare(
+    'UPDATE ebay_listings SET brand_id = @brand_id, model_id = @model_id WHERE id = @id',
   );
 
-  let applied = 0;
-  let skipped = 0;
   let created = 0;
-  let modelsWritten = 0;
+  let untouched = 0;
+  let models = 0;
+  let attributed = 0;
 
-  const writeModels = (brandId: number, names: string[]) => {
-    for (const name of names) {
-      const modelSlug = normaliseBrand(name);
-      if (!modelSlug) continue;
-      upsertModel.run({ brand_id: brandId, slug: modelSlug, name, at });
-      modelsWritten += 1;
-    }
+  /** Canonical slug -> brand id, for this category only. Filled as brands are settled. */
+  const brandIds = new Map<string, number>();
+
+  const modelId = (brandId: number, name: string): number | null => {
+    const slug = normaliseBrand(name);
+    if (!slug) return null;
+    const info = insertModel.run({ brand_id: brandId, slug, name, at });
+    const row = selectModel.get(brandId, slug) as { id: number } | undefined;
+    if (!row) return null;
+    if (info.changes) models += 1;
+    else touchModel.run({ id: row.id, at });
+    return row.id;
   };
 
   db.transaction(() => {
     for (const verdict of verdicts) {
       const slug = normaliseBrand(verdict.name);
-      if (!slug) { skipped += 1; continue; }
+      if (!slug) continue;
 
-      // The same rule every other door enforces: no description, no common.
-      const resolved = resolveTier(verdict.tier, verdict.lookFor);
-
-      const existing = select.get(slug) as
-        | { id: number; tier_source: string; locked: number }
-        | undefined;
-
-      if (!existing) {
-        insert.run({ slug, name: verdict.name, tier: resolved.tier, look_for: resolved.look_for, at });
-        const id = (db.prepare('SELECT id FROM ebay_brands WHERE slug = ?').get(slug) as { id: number }).id;
-        if (resolved.tier === 'common') writeModels(id, verdict.models);
-        created += 1;
-        applied += 1;
+      const existing = selectBrand.get(categoryId, slug) as { id: number } | undefined;
+      if (existing) {
+        // Present already. Its tier is not this function's business.
+        touchBrand.run({ id: existing.id, at });
+        brandIds.set(slug, existing.id);
+        untouched += 1;
         continue;
       }
 
-      if (existing.locked === 1 || existing.tier_source === 'manual') { skipped += 1; continue; }
-      const info = update.run({ id: existing.id, tier: resolved.tier, look_for: resolved.look_for, at });
-      if (info.changes) {
-        if (resolved.tier === 'common') writeModels(existing.id, verdict.models);
-        applied += 1;
-      } else skipped += 1;
+      // New to this category, so the classifier's tier is the only one available. The same
+      // rule every other door enforces still applies: no description, no common.
+      const resolved = resolveTier(verdict.tier, verdict.lookFor);
+      const info = insertBrand.run({
+        category_id: categoryId,
+        slug,
+        name: verdict.name,
+        tier: resolved.tier,
+        look_for: resolved.look_for,
+        at,
+      });
+      brandIds.set(slug, Number(info.lastInsertRowid));
+      created += 1;
+    }
+
+    // Models for every brand in every tier — rare included, which is the change.
+    for (const verdict of verdicts) {
+      const brandId = brandIds.get(normaliseBrand(verdict.name));
+      if (!brandId) continue;
+      for (const name of verdict.models) modelId(brandId, name);
+    }
+
+    /* Attribution last, once every brand named in this reading has an id. */
+    for (const item of reading.items) {
+      const listingId = listingIds[item.index];
+      if (listingId === undefined) continue;
+
+      const raw = normaliseBrand(item.brand);
+      const brandId = brandIds.get(aliasOf.get(raw) ?? raw);
+      if (!brandId) continue;
+
+      linkListing.run({
+        id: listingId,
+        brand_id: brandId,
+        model_id: item.model ? modelId(brandId, item.model) : null,
+      });
+      attributed += 1;
     }
   })();
 
-  // After the names are settled, not before — a brand created in this pass has no id to
-  // attribute listings to until its row exists.
-  refreshBrandStats();
+  // After the rows exist, not before — a brand created in this pass has no id to attribute
+  // listings to until it does.
+  refreshBrandStats(categoryId);
 
-  return { applied, skipped, created, models: modelsWritten };
+  return { created, untouched, models, attributed };
 }
 
 /**
- * Apply the proposals that are safe to apply without asking.
+ * What the sold prices would say, if anyone were asking them.
  *
- * Safe means: the brand carries no human decision, and the proposal does not create a
- * common brand with nothing to look for. Everything else is returned for a person to
- * confirm — which is the same division of labour the rest of the book uses.
+ * THIS NO LONGER WRITES, and the empty body is the feature. The scorer used to move brands
+ * between tiers on its own when the AI was unavailable, which made it the second thing —
+ * beside the classifier — capable of undoing a decision the user had made. Both are now
+ * out of that business: a brand's tier is set once, when the brand is first seen, and after
+ * that only the user changes it.
+ *
+ * The proposals are still computed and still shown. `analyseBrands` is what the Brand
+ * Report reads, and a suggestion nobody is obliged to take is useful — it is the same
+ * arithmetic, minus the authority. Kept as a function returning zeroes rather than deleted
+ * so the shape of the API does not change under the client mid-release.
  */
 export function applyProposals(proposals: BrandProposal[]): { applied: number; skipped: number } {
-  const update = db.prepare(
-    `UPDATE ebay_brands
-        SET tier = @tier,
-            look_for = @look_for,
-            tier_source = 'evidence'
-      WHERE id = @id AND tier_source NOT IN ('manual', 'ai') AND locked = 0`,
-  );
-
-  let applied = 0;
-  let skipped = 0;
-
-  db.transaction(() => {
-    for (const proposal of proposals) {
-      if (proposal.locked || !proposal.changed) { skipped += 1; continue; }
-      if (proposal.proposedTier === 'common' && !proposal.lookFor) { skipped += 1; continue; }
-      const info = update.run({
-        id: proposal.brandId,
-        tier: proposal.proposedTier,
-        // Rare carries no qualification; unsorted keeps whatever was mined for later.
-        look_for: proposal.proposedTier === 'rare' ? null : proposal.lookFor,
-      });
-      if (info.changes) applied += 1;
-      else skipped += 1;
-    }
-  })();
-
-  return { applied, skipped };
+  return { applied: 0, skipped: proposals.length };
 }

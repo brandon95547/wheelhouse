@@ -12,21 +12,40 @@
 
 const DEFAULT_BACKEND_URL = 'http://localhost:4000';
 
-/** Used only if the backend cannot be reached; matches the seeded categories. */
+/*
+ * Used only if the backend cannot be reached. Must match EBAY_CATEGORIES in
+ * server/src/lib/db.ts — the slugs here are what an import is filed under, and a
+ * slug this list invents is one the server will reject.
+ *
+ * A category is now more than a label on a listing: the brand book is kept PER
+ * CATEGORY, so importing shoes into the shirts category does not merely mis-file
+ * a row, it teaches the wrong book.
+ */
 const FALLBACK_CATEGORIES = [
   { slug: 'media-books', group_name: 'Media', name: 'Books' },
   { slug: 'media-dvds', group_name: 'Media', name: 'DVDs' },
   { slug: 'media-vhs-tapes', group_name: 'Media', name: 'VHS Tapes' },
-  { slug: 'men-shirts', group_name: 'Men', name: 'Shirts' },
-  { slug: 'men-jeans', group_name: 'Men', name: 'Jeans' },
-  { slug: 'men-jackets', group_name: 'Men', name: 'Jackets' },
   { slug: 'men-shoes', group_name: 'Men', name: 'Shoes' },
   { slug: 'men-boots', group_name: 'Men', name: 'Boots' },
-  { slug: 'women-shirts', group_name: 'Women', name: 'Shirts' },
-  { slug: 'women-jeans', group_name: 'Women', name: 'Jeans' },
-  { slug: 'women-jackets', group_name: 'Women', name: 'Jackets' },
   { slug: 'women-shoes', group_name: 'Women', name: 'Shoes' },
   { slug: 'women-boots', group_name: 'Women', name: 'Boots' },
+  { slug: 'mens-clothing-activewear', group_name: "Men's Clothing", name: 'Activewear' },
+  { slug: 'mens-clothing-coats-jackets-vests', group_name: "Men's Clothing", name: 'Coats, Jackets & Vests' },
+  { slug: 'mens-clothing-jeans-pants', group_name: "Men's Clothing", name: 'Jeans, Pants' },
+  { slug: 'mens-clothing-shirts', group_name: "Men's Clothing", name: 'Shirts' },
+  { slug: 'mens-clothing-shorts', group_name: "Men's Clothing", name: 'Shorts' },
+  { slug: 'mens-clothing-suits-blazers', group_name: "Men's Clothing", name: 'Suits & Blazers' },
+  { slug: 'mens-clothing-sweaters', group_name: "Men's Clothing", name: 'Sweaters' },
+  { slug: 'mens-clothing-vintage-t-shirts', group_name: "Men's Clothing", name: 'Vintage T-Shirts' },
+  { slug: 'womens-clothing-activewear', group_name: "Women's Clothing", name: 'Activewear' },
+  { slug: 'womens-clothing-coats-jackets-vests', group_name: "Women's Clothing", name: 'Coats, Jackets & Vests' },
+  { slug: 'womens-clothing-dresses', group_name: "Women's Clothing", name: 'Dresses' },
+  { slug: 'womens-clothing-jeans-pants', group_name: "Women's Clothing", name: 'Jeans, Pants' },
+  { slug: 'womens-clothing-shorts', group_name: "Women's Clothing", name: 'Shorts' },
+  { slug: 'womens-clothing-skirts', group_name: "Women's Clothing", name: 'Skirts' },
+  { slug: 'womens-clothing-suits-blazers', group_name: "Women's Clothing", name: 'Suits & Blazers' },
+  { slug: 'womens-clothing-sweaters', group_name: "Women's Clothing", name: 'Sweaters' },
+  { slug: 'womens-clothing-tops', group_name: "Women's Clothing", name: 'Tops' },
 ];
 
 const el = (id) => document.getElementById(id);
@@ -151,7 +170,23 @@ function renderCategories(categories) {
     ui.category.append(group);
   }
 
-  if (state.lastCategory) ui.category.value = state.lastCategory;
+  /*
+   * Restore the last category, and say so when it is gone.
+   *
+   * Setting .value to a slug no option carries silently leaves the placeholder
+   * selected. That is safe — the import refuses to run without a category — but a
+   * remembered choice that quietly reverts looks like the popup forgot rather than
+   * like the category was retired, and the user would keep re-picking it.
+   */
+  if (state.lastCategory) {
+    ui.category.value = state.lastCategory;
+    if (ui.category.value !== state.lastCategory) {
+      showResult(
+        `The category you last imported into ("${state.lastCategory}") no longer exists. Pick another one.`,
+        'warn',
+      );
+    }
+  }
 }
 
 async function loadCategories() {

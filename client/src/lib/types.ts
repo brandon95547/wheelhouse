@@ -200,6 +200,12 @@ export interface EbayBrandModel {
 
 export interface EbayBrand {
   id: number;
+  /* A brand is judged inside one category. "Nike" under Men/Shoes and "Nike" under
+     Men/Shirts are separate rows with separate tiers and separate models. */
+  category_id: number;
+  category_slug: string;
+  category_name: string;
+  category_group: string;
   slug: string;
   name: string;
   tier: BrandTier;

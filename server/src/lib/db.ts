@@ -128,10 +128,27 @@ CREATE TABLE IF NOT EXISTS ebay_listings (
   item_url       TEXT,
   dedupe_key     TEXT    NOT NULL UNIQUE,
   source_page    TEXT,
-  imported_at    TEXT    NOT NULL
+  imported_at    TEXT    NOT NULL,
+  /* What this listing turned out to BE, decided once at import and then left alone.
+   *
+   * Storing the attribution rather than recomputing it is what makes a model's sold
+   * count and median honest: they are counted from the actual sales that carried the
+   * model, not inferred from which titles happen to share a word. Null is a real
+   * answer in both columns — a brand nobody recognised, or a recognised brand whose
+   * model could not be read off the title. */
+  brand_id       INTEGER REFERENCES ebay_brands(id) ON DELETE SET NULL,
+  model_id       INTEGER REFERENCES ebay_brand_models(id) ON DELETE SET NULL
 );
 
 /* The brand book, learned from what actually sold.
+ *
+ * ONE BOOK PER CATEGORY. A brand is judged inside a category and nowhere else: Nike
+ * under Men/Shoes is a different row, with its own tier and its own models, from Nike
+ * under Men/Shirts. This is not a technicality — a label that means "inspect it" on a
+ * shoe rack can mean nothing at all on a shirt rail, and one global verdict would have
+ * to be wrong in one of the two places. Hence the hierarchy the whole feature hangs on:
+ *
+ *   category (Men/Shoes)  ->  brand (Nike)  ->  model (Air Max 90)
  *
  * TWO TIERS, which is the whole point:
  *
@@ -143,8 +160,9 @@ CREATE TABLE IF NOT EXISTS ebay_listings (
  * exactly what the next revision of the guide should absorb, and they need somewhere
  * to sit while that judgement is made.
  *
- * "slug" is the normalised name and it is UNIQUE, so "Dr. Martens", "Dr Martens" and
- * "DR. MARTENS" are one row however many imports they arrive in.
+ * "slug" is the normalised name, unique WITHIN a category, so "Dr. Martens", "Dr
+ * Martens" and "DR. MARTENS" are one row however many imports they arrive in — while
+ * the same brand under another category stays free to be judged on its own terms.
  *
  * "price_samples" holds a bounded JSON array of observed sold prices. A running
  * average would be cheaper, but the median is what matters for resale — one $900
@@ -152,7 +170,8 @@ CREATE TABLE IF NOT EXISTS ebay_listings (
  * total. Bounded so a brand with ten thousand sales does not grow without limit. */
 CREATE TABLE IF NOT EXISTS ebay_brands (
   id             INTEGER PRIMARY KEY AUTOINCREMENT,
-  slug           TEXT    NOT NULL UNIQUE,
+  category_id    INTEGER NOT NULL REFERENCES ebay_categories(id) ON DELETE CASCADE,
+  slug           TEXT    NOT NULL,
   name           TEXT    NOT NULL,
   tier           TEXT    NOT NULL DEFAULT 'unsorted',
   tier_source    TEXT    NOT NULL DEFAULT 'import',
@@ -166,14 +185,26 @@ CREATE TABLE IF NOT EXISTS ebay_brands (
   locked         INTEGER NOT NULL DEFAULT 0,
   notes          TEXT,
   first_seen     TEXT    NOT NULL,
-  last_seen      TEXT    NOT NULL
+  last_seen      TEXT    NOT NULL,
+  UNIQUE (category_id, slug)
 );
 
 /* Models within a brand, and the reason this table exists:
  *
  * "Nike Jordan" is worth picking up, but Nike made Jordan models that are not. A tier
- * on the BRAND cannot express that, so the exception has to live one level down. Rows
- * come from two places and both matter:
+ * on the BRAND cannot express that, so the exception has to live one level down.
+ *
+ * COLLECTED FOR EVERY TIER, not only for common brands. A rare brand's models used to
+ * go unrecorded on the reasoning that the label alone was the signal, so the detail was
+ * redundant. That was backwards: the model list is a record of what the brand actually
+ * sells and at what price, and it is worth the same on a rare brand as on a common one.
+ * It is also what a tier change needs — moving a brand to common demands a description
+ * of what to look for, and a brand with no models recorded cannot supply one.
+ *
+ * Category comes through brand_id. A model belongs to one brand, that brand belongs to
+ * one category, and no row here needs to say so twice.
+ *
+ * Rows come from two places and both matter:
  *
  *   verdict = 'worthy'      what the guide named — Jordan, SB Dunk, 990
  *   verdict = 'not_worthy'  an exclusion, almost always added by hand after seeing a
@@ -231,16 +262,34 @@ const EBAY_CATEGORIES: Array<[group: string, name: string]> = [
   ['Media', 'Books'],
   ['Media', 'DVDs'],
   ['Media', 'VHS Tapes'],
-  ['Men', 'Shirts'],
-  ['Men', 'Jeans'],
-  ['Men', 'Jackets'],
+
+  /* Footwear keeps the original "Men"/"Women" group. It reads a little oddly beside
+     "Men's Clothing", and it stays anyway: the group and the name together make the slug,
+     so renaming this group would orphan every listing and every brand already filed under
+     men-shoes. A cosmetic tidy is not worth detaching a book from its evidence. */
   ['Men', 'Shoes'],
   ['Men', 'Boots'],
-  ['Women', 'Shirts'],
-  ['Women', 'Jeans'],
-  ['Women', 'Jackets'],
   ['Women', 'Shoes'],
   ['Women', 'Boots'],
+
+  ["Men's Clothing", 'Activewear'],
+  ["Men's Clothing", 'Coats, Jackets & Vests'],
+  ["Men's Clothing", 'Jeans, Pants'],
+  ["Men's Clothing", 'Shirts'],
+  ["Men's Clothing", 'Shorts'],
+  ["Men's Clothing", 'Suits & Blazers'],
+  ["Men's Clothing", 'Sweaters'],
+  ["Men's Clothing", 'Vintage T-Shirts'],
+
+  ["Women's Clothing", 'Activewear'],
+  ["Women's Clothing", 'Coats, Jackets & Vests'],
+  ["Women's Clothing", 'Dresses'],
+  ["Women's Clothing", 'Jeans, Pants'],
+  ["Women's Clothing", 'Shorts'],
+  ["Women's Clothing", 'Skirts'],
+  ["Women's Clothing", 'Suits & Blazers'],
+  ["Women's Clothing", 'Sweaters'],
+  ["Women's Clothing", 'Tops'],
 ];
 
 const OPTION_VALUES: Record<string, string[]> = {
@@ -269,6 +318,9 @@ const OPTION_VALUES: Record<string, string[]> = {
 export function slugify(group: string, name: string): string {
   return `${group}-${name}`
     .toLowerCase()
+    // Apostrophes close up rather than splitting, so "Men's Clothing" is mens-clothing
+    // and not men-s-clothing. These slugs appear in URLs and in the extension's config.
+    .replace(/['’]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '');
 }
@@ -286,7 +338,97 @@ const ADDED_COLUMNS: Array<[table: string, column: string, ddl: string]> = [
   // from tier_source='manual', which only records who last set the tier: a locked brand
   // is a standing instruction to leave this row alone, and it outranks the evidence.
   ['ebay_brands', 'locked', 'INTEGER NOT NULL DEFAULT 0'],
+  // What a listing turned out to be. Nullable on purpose — see the table comment. Added
+  // rather than rebuilt because neither column carries a constraint an ALTER cannot add.
+  ['ebay_listings', 'brand_id', 'INTEGER REFERENCES ebay_brands(id) ON DELETE SET NULL'],
+  ['ebay_listings', 'model_id', 'INTEGER REFERENCES ebay_brand_models(id) ON DELETE SET NULL'],
 ];
+
+/**
+ * Move an existing brand book under a category.
+ *
+ * Brands became category-scoped, which means the old `slug TEXT NOT NULL UNIQUE` has to
+ * become `UNIQUE (category_id, slug)`. SQLite implements the inline form as an implicit
+ * index that no ALTER can drop, so the only way through is to rebuild the table — hence
+ * a migration with real steps rather than another line in ADDED_COLUMNS.
+ *
+ * Which category the existing rows belong to has to be inferred, because the old book
+ * never recorded one. The answer used is THE CATEGORY HOLDING THE MOST LISTINGS: the
+ * book was learned from listings, and in practice it was learned from whichever category
+ * the user has actually been scanning. A brand that lands in the wrong place is visible
+ * and one click to delete, which is the right failure mode for a guess made once.
+ *
+ * Ids are preserved, so ebay_brand_models keeps pointing at the same brands. Foreign keys
+ * are suspended for the swap — with them on, DROP TABLE would cascade and take every
+ * model row with it, which is precisely the data this migration exists to keep.
+ */
+function scopeBrandsToCategory(): void {
+  const columns = db.prepare('PRAGMA table_info(ebay_brands)').all() as Array<{ name: string }>;
+  // Already scoped, or freshly created by SCHEMA above. Either way there is nothing to do.
+  if (columns.some((c) => c.name === 'category_id')) return;
+
+  const home = db
+    .prepare(
+      `SELECT c.id FROM ebay_categories c
+         LEFT JOIN ebay_listings l ON l.category_id = c.id
+        GROUP BY c.id ORDER BY count(l.id) DESC, c.sort_order ASC LIMIT 1`,
+    )
+    .get() as { id: number } | undefined;
+  // No categories at all means no database worth migrating.
+  if (!home) return;
+
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(`
+        CREATE TABLE ebay_brands_scoped (
+          id             INTEGER PRIMARY KEY AUTOINCREMENT,
+          category_id    INTEGER NOT NULL REFERENCES ebay_categories(id) ON DELETE CASCADE,
+          slug           TEXT    NOT NULL,
+          name           TEXT    NOT NULL,
+          tier           TEXT    NOT NULL DEFAULT 'unsorted',
+          tier_source    TEXT    NOT NULL DEFAULT 'import',
+          kind           TEXT,
+          sold_count     INTEGER NOT NULL DEFAULT 0,
+          rejected_count INTEGER NOT NULL DEFAULT 0,
+          median_price   REAL,
+          high_price     REAL,
+          price_samples  TEXT    NOT NULL DEFAULT '[]',
+          look_for       TEXT,
+          locked         INTEGER NOT NULL DEFAULT 0,
+          notes          TEXT,
+          first_seen     TEXT    NOT NULL,
+          last_seen      TEXT    NOT NULL,
+          UNIQUE (category_id, slug)
+        );`);
+
+      db.prepare(
+        `INSERT INTO ebay_brands_scoped
+           (id, category_id, slug, name, tier, tier_source, kind, sold_count, rejected_count,
+            median_price, high_price, price_samples, look_for, locked, notes, first_seen, last_seen)
+         SELECT id, ?, slug, name, tier, tier_source, kind, sold_count, rejected_count,
+                median_price, high_price, price_samples, look_for, locked, notes, first_seen, last_seen
+           FROM ebay_brands`,
+      ).run(home.id);
+
+      db.exec('DROP TABLE ebay_brands');
+      db.exec('ALTER TABLE ebay_brands_scoped RENAME TO ebay_brands');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_brands_tier     ON ebay_brands(tier)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_brands_category ON ebay_brands(category_id)');
+
+      // Inside the transaction, so a failure rolls the swap back instead of reporting a
+      // problem with the damage already committed.
+      const broken = db.pragma('foreign_key_check') as unknown[];
+      if (broken.length) {
+        throw new Error(
+          `Brand migration would leave ${broken.length} dangling reference(s) — rolled back`,
+        );
+      }
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
 
 export function migrate(): void {
   db.exec(SCHEMA);
@@ -319,6 +461,47 @@ export function migrate(): void {
       values.forEach((value, i) => insertOption.run(domain, value, i));
     }
   })();
+
+  // In this order for two reasons: the rebuild copies look_for and locked, so
+  // ADDED_COLUMNS must have run; and it files existing brands under a category, so the
+  // categories must already be seeded.
+  scopeBrandsToCategory();
+
+  /* Retire categories the seed no longer lists — "Men/Shirts", once the same category has
+     arrived as "Men's Clothing/Shirts". Without this the two sit side by side forever and
+     the import dropdown asks the user to choose between a category and its replacement.
+     After scopeBrandsToCategory, because the check below reads ebay_brands.category_id and
+     on an existing install that column arrives in the step above.
+   *
+   * ONLY WHEN EMPTY, which is the whole safety of it. A superseded category still holding
+   * listings or brands is not a stale seed row, it is data the user scanned — so it stays,
+   * and the duplicate is theirs to resolve. Nothing here can reach a listing. */
+  const keep = new Set(EBAY_CATEGORIES.map(([group, name]) => slugify(group, name)));
+  const retired = (
+    db
+      .prepare(
+        `SELECT c.id, c.slug FROM ebay_categories c
+           LEFT JOIN ebay_listings l ON l.category_id = c.id
+           LEFT JOIN ebay_brands   b ON b.category_id = c.id
+          GROUP BY c.id HAVING count(l.id) = 0 AND count(b.id) = 0`,
+      )
+      .all() as Array<{ id: number; slug: string }>
+  ).filter((row) => !keep.has(row.slug));
+
+  if (retired.length) {
+    const drop = db.prepare('DELETE FROM ebay_categories WHERE id = ?');
+    db.transaction(() => retired.forEach((row) => drop.run(row.id)))();
+  }
+
+  /* Indexes over columns that only exist once the steps above have run. They cannot sit
+     in SCHEMA: `CREATE TABLE IF NOT EXISTS` is a no-op on a database that already has the
+     table, so on an existing install the index would be asked for a column that arrives
+     later in this same function. */
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_brands_category ON ebay_brands(category_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_brand  ON ebay_listings(brand_id);
+    CREATE INDEX IF NOT EXISTS idx_listings_model  ON ebay_listings(model_id);
+  `);
 }
 
 /** Option lists, grouped by domain, for the client to render its selects. */

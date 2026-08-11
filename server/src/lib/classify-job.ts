@@ -22,7 +22,7 @@
  */
 import { db } from './db.js';
 import { classifyListings } from './brand-ai.js';
-import { applyAiVerdicts } from './brand-analysis.js';
+import { applyReading, type ReadingResult } from './brand-analysis.js';
 import { aiConfigured } from './llm.js';
 
 export interface ClassifyStatus {
@@ -31,7 +31,7 @@ export interface ClassifyStatus {
   finishedAt: string | null;
   /** Listings the running (or last) job was given. */
   listingCount: number;
-  result: { applied: number; created: number; skipped: number; models: number } | null;
+  result: ReadingResult | null;
   error: string | null;
 }
 
@@ -47,15 +47,19 @@ let status: ClassifyStatus = {
 export const classifyStatus = (): ClassifyStatus => ({ ...status });
 
 interface StoredListing {
+  id: number;
   title: string;
   sold_price: number | null;
 }
 
-function storedListings(categoryId?: number): StoredListing[] {
-  const sql =
-    'SELECT title, sold_price FROM ebay_listings WHERE sold_price IS NOT NULL' +
-    (categoryId ? ' AND category_id = ?' : '');
-  return (categoryId ? db.prepare(sql).all(categoryId) : db.prepare(sql).all()) as StoredListing[];
+function storedListings(categoryId: number): StoredListing[] {
+  return db
+    .prepare(
+      `SELECT id, title, sold_price FROM ebay_listings
+        WHERE sold_price IS NOT NULL AND category_id = ?
+        ORDER BY id`,
+    )
+    .all(categoryId) as StoredListing[];
 }
 
 /**
@@ -64,7 +68,7 @@ function storedListings(categoryId?: number): StoredListing[] {
  * Resolves when the work is done. Callers that must not wait — the import — should not
  * await it; see `startClassification`.
  */
-export async function runClassification(categoryId?: number): Promise<ClassifyStatus> {
+export async function runClassification(categoryId: number): Promise<ClassifyStatus> {
   const listings = storedListings(categoryId);
 
   status = {
@@ -80,12 +84,14 @@ export async function runClassification(categoryId?: number): Promise<ClassifySt
     if (!aiConfigured()) throw new Error('OPENAI_API_KEY is not set');
     if (!listings.length) throw new Error('No listings with a sold price to classify');
 
-    const verdicts = await classifyListings(listings);
-    if (verdicts === null) {
+    const reading = await classifyListings(listings);
+    if (reading === null) {
       throw new Error('The classifier did not return a usable response — see the server log');
     }
 
-    status.result = applyAiVerdicts(verdicts);
+    // Position for position with what was sent, so an attribution lands on the listing it
+    // was actually about.
+    status.result = applyReading(categoryId, reading, listings.map((l) => l.id));
   } catch (error) {
     status.error = error instanceof Error ? error.message : String(error);
     console.warn(`[classify] ${status.error}`);
@@ -103,7 +109,7 @@ export async function runClassification(categoryId?: number): Promise<ClassifySt
  * Returns false when one is already running — two concurrent runs would race on the same
  * rows and bill twice for the same answer.
  */
-export function startClassification(categoryId?: number): boolean {
+export function startClassification(categoryId: number): boolean {
   if (status.running) return false;
   // Marked immediately so a second call in the same tick cannot also start one.
   status = { ...status, running: true, error: null, result: null };

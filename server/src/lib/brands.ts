@@ -43,10 +43,15 @@ export const VERDICTS: Verdict[] = ['worthy', 'not_worthy'];
 export const MAX_PRICE_SAMPLES = 500;
 
 /**
- * The dedupe key. Must stay in step with `normalise` in the Lookout extension
- * (lib/classify.js) — if these two ever disagree, the same brand arrives under two
- * slugs and the book quietly grows duplicates, which is the one thing the user asked
- * it not to do.
+ * The dedupe key, and the only definition of it. "Dr. Martens", "Dr Martens" and "DR.
+ * MARTENS" all land on one slug however many imports they arrive in.
+ *
+ * It used to have to stay in step with a copy inside the Lookout extension, because the
+ * extension posted a brand rollup of its own. That door is closed — the extension sends
+ * listings and nothing else — so there is one implementation again, and no second copy to
+ * drift out of agreement with.
+ *
+ * Unique per CATEGORY rather than globally: see the ebay_brands table comment.
  */
 export function normaliseBrand(value: unknown): string {
   return String(value ?? '')
@@ -128,6 +133,10 @@ export function median(values: number[]): number | null {
 
 export interface BrandRow {
   id: number;
+  category_id: number;
+  category_slug: string;
+  category_name: string;
+  category_group: string;
   slug: string;
   name: string;
   tier: Tier;
@@ -162,30 +171,54 @@ export interface BrandRow {
  * Within a brand, models lead with the exclusions — those are the surprising ones, and
  * the reason to look at a common brand at all.
  */
-export function listBrands(filter?: { tier?: string; search?: string }): BrandRow[] {
+export function listBrands(filter?: {
+  tier?: string;
+  search?: string;
+  categoryId?: number;
+}): BrandRow[] {
   const clauses: string[] = [];
   const params: unknown[] = [];
 
+  if (filter?.categoryId) {
+    clauses.push('b.category_id = ?');
+    params.push(filter.categoryId);
+  }
   if (filter?.tier && filter.tier !== 'all') {
-    clauses.push('tier = ?');
+    clauses.push('b.tier = ?');
     params.push(filter.tier);
   }
   if (filter?.search) {
-    clauses.push('name LIKE ? ESCAPE \'\\\'');
+    clauses.push('b.name LIKE ? ESCAPE \'\\\'');
     params.push(`%${filter.search.replace(/[%_]/g, (m) => `\\${m}`)}%`);
   }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
 
+  /* The category comes along for the ride. Viewing every category at once puts two rows
+     called "Nike" on the same page, and without this the user cannot tell which book each
+     one belongs to. */
   const brands = db
-    .prepare(`SELECT * FROM ebay_brands${where} ORDER BY name COLLATE NOCASE ASC`)
+    .prepare(
+      `SELECT b.*, c.slug AS category_slug, c.name AS category_name,
+              c.group_name AS category_group
+         FROM ebay_brands b
+         JOIN ebay_categories c ON c.id = b.category_id${where}
+        ORDER BY c.sort_order, b.name COLLATE NOCASE ASC`,
+    )
     .all(...params) as BrandRow[];
 
-  const models = db
-    .prepare(
-      `SELECT * FROM ebay_brand_models
-        ORDER BY verdict = 'worthy' ASC, sold_count DESC, name COLLATE NOCASE ASC`,
-    )
-    .all() as Array<BrandRow['models'][number] & { brand_id: number }>;
+  /* Only the models of the brands actually returned. Fetching the whole table and grouping
+     was fine when there was one book; with a book per category it would read every other
+     category's models to throw them away. */
+  const ids = brands.map((b) => b.id);
+  const models = ids.length
+    ? (db
+        .prepare(
+          `SELECT * FROM ebay_brand_models
+            WHERE brand_id IN (${ids.map(() => '?').join(',')})
+            ORDER BY verdict = 'worthy' ASC, sold_count DESC, name COLLATE NOCASE ASC`,
+        )
+        .all(...ids) as Array<BrandRow['models'][number] & { brand_id: number }>)
+    : [];
 
   const byBrand = new Map<number, BrandRow['models']>();
   for (const model of models) {

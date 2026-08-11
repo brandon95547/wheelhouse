@@ -17,6 +17,11 @@
  * a Common row with nothing to look for tells someone standing in a thrift store that
  * every Nike on the rack is worth money, which is worse than telling them nothing.
  *
+ * ONE BOOK PER CATEGORY. A brand is judged inside a category — Nike on a shoe rack is a
+ * different question from Nike on a shirt rail — so the picker at the top is not a filter
+ * over one book, it chooses WHICH book you are reading. "All categories" is the exception
+ * and shows every one at once, which is why each row wears its category there.
+ *
  * ALPHABETICAL, NOT BY VALUE. This is a reference you consult while holding a shoe in a
  * thrift store, and the only order that helps then is the one your eye can scan.
  *
@@ -30,7 +35,7 @@ import { EmptyState, ErrorState, LoadingState, SearchInput } from '../../compone
 import { useApi, useDebouncedValue } from '../../hooks/useApi';
 import { useToast } from '../../hooks/useToast';
 import { api } from '../../lib/api';
-import type { BrandTier, EbayBrand, EbayBrandBook, ModelVerdict } from '../../lib/types';
+import type { BrandTier, EbayBrand, EbayBrandBook, EbayCategory, ModelVerdict } from '../../lib/types';
 
 const GROUPS: Array<{
   tier: BrandTier;
@@ -82,19 +87,33 @@ function brandBookText(book: EbayBrandBook): string {
       `${book.counts.not_worthy ? ` · ${book.counts.not_worthy} not worth it` : ''}`,
   ];
 
-  for (const { tier, title, blurb } of GROUPS) {
-    const brands = book.brands.filter((brand) => brand.tier === tier);
-    if (!brands.length) continue;
-    lines.push('', rule, `${title.toUpperCase()} (${brands.length})`, blurb, rule, '');
+  /* One section per category, because a brand only means anything inside one. An export
+     that ran the categories together would print "Nike — rare" and "Nike — common" as two
+     unexplained contradictions. */
+  const byCategory = new Map<string, EbayBrand[]>();
+  for (const brand of book.brands) {
+    const key = `${brand.category_group} / ${brand.category_name}`;
+    byCategory.set(key, [...(byCategory.get(key) ?? []), brand]);
+  }
 
-    for (const brand of brands) {
-      lines.push(brand.name);
-      // The "Look for" line is the whole point of a common row, so it leads — a printed
-      // list of bare common brand names would be actively misleading in an aisle.
-      if (brand.look_for) lines.push(`    Look for: ${brand.look_for}`);
-      if (brand.notes) lines.push(`    ${brand.notes}`);
-      // Only common brands turn on the model, so only they carry a model list.
-      if (tier === 'common') {
+  for (const [categoryLabel, categoryBrands] of byCategory) {
+    lines.push('', '#'.repeat(60), categoryLabel.toUpperCase(), '#'.repeat(60));
+
+    for (const { tier, title, blurb } of GROUPS) {
+      const brands = categoryBrands.filter((brand) => brand.tier === tier);
+      if (!brands.length) continue;
+      lines.push('', rule, `${title.toUpperCase()} (${brands.length})`, blurb, rule, '');
+
+      for (const brand of brands) {
+        lines.push(brand.name);
+        // The "Look for" line is the whole point of a common row, so it leads — a printed
+        // list of bare common brand names would be actively misleading in an aisle.
+        if (brand.look_for) lines.push(`    Look for: ${brand.look_for}`);
+        if (brand.notes) lines.push(`    ${brand.notes}`);
+
+        /* Models print under every tier now, not only common. On a rare brand they are not
+           a buying rule — the label already decided that — they are what the brand has
+           actually been seen selling, which is worth knowing while you hold one. */
         const worthy = brand.models.filter((m) => m.verdict === 'worthy');
         const skip = brand.models.filter((m) => m.verdict === 'not_worthy');
         if (worthy.length) lines.push(`    Seen selling: ${worthy.map((m) => m.name).join(', ')}`);
@@ -109,9 +128,22 @@ function brandBookText(book: EbayBrandBook): string {
 export function BrandBook() {
   const toast = useToast();
   const [search, setSearch] = useState('');
+  const [category, setCategory] = useState('all');
   const [exporting, setExporting] = useState(false);
   const query = useDebouncedValue(search, 250);
-  const book = useApi<EbayBrandBook>('/ebay/brands', { search: query });
+  const { data: categories } = useApi<EbayCategory[]>('/ebay/categories');
+  const book = useApi<EbayBrandBook>('/ebay/brands', { search: query, category });
+
+  /** Categories grouped for the <optgroup>s, same shape the listings filter uses. */
+  const categoryGroups = useMemo(() => {
+    const groups = new Map<string, EbayCategory[]>();
+    for (const item of categories ?? []) {
+      const list = groups.get(item.group_name) ?? [];
+      list.push(item);
+      groups.set(item.group_name, list);
+    }
+    return [...groups.entries()];
+  }, [categories]);
 
   const grouped = useMemo(() => {
     const map = new Map<BrandTier, EbayBrand[]>([
@@ -178,12 +210,14 @@ export function BrandBook() {
     }
   }
 
-  /* Exports the WHOLE book, not the current search. An export you have to remember to
-     clear the filter for is one that quietly lies to you later. */
+  /* Ignores the search box, follows the category picker. The distinction is what each one
+     means: a search is a transient filter, and an export you have to remember to clear it
+     for quietly lies to you later — but the category is WHICH BOOK you are reading, and
+     exporting a shoe book that silently included shirts would be the same lie in reverse. */
   async function exportBook() {
     setExporting(true);
     try {
-      const all = await api.get<EbayBrandBook>('/ebay/brands');
+      const all = await api.get<EbayBrandBook>('/ebay/brands', { category });
       const url = URL.createObjectURL(
         new Blob([brandBookText(all)], { type: 'text/plain;charset=utf-8' }),
       );
@@ -229,6 +263,23 @@ export function BrandBook() {
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <SearchInput value={search} onChange={setSearch} label="Search brands" placeholder="Search brands…" />
+        <select
+          className="select w-full sm:w-56"
+          value={category}
+          aria-label="Which category's brand book to read"
+          onChange={(event) => setCategory(event.target.value)}
+        >
+          <option value="all">All categories</option>
+          {categoryGroups.map(([group, items]) => (
+            <optgroup key={group} label={group}>
+              {items.map((item) => (
+                <option key={item.slug} value={item.slug}>
+                  {item.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
         <p className="text-xs text-on-surface-muted sm:ml-auto" aria-live="polite">
           {book.data?.counts.rare ?? 0} rare · {book.data?.counts.common ?? 0} common ·{' '}
           {book.data?.counts.unsorted ?? 0} unsorted
@@ -267,6 +318,9 @@ export function BrandBook() {
                 <BrandRow
                   key={brand.id}
                   brand={brand}
+                  // Only when every category is on screen at once. Inside one book the
+                  // label would be the same on every row, which is noise.
+                  showCategory={category === 'all'}
                   onMove={moveTier}
                   onLock={toggleLock}
                   onLookFor={setLookFor}
@@ -290,6 +344,7 @@ const LOOK_FOR_PLACEHOLDER =
 
 function BrandRow({
   brand,
+  showCategory,
   onMove,
   onLock,
   onLookFor,
@@ -298,6 +353,7 @@ function BrandRow({
   onRemove,
 }: {
   brand: EbayBrand;
+  showCategory: boolean;
   onMove: (brand: EbayBrand, tier: BrandTier, lookFor?: string) => void;
   onLock: (brand: EbayBrand) => void;
   onLookFor: (brand: EbayBrand, lookFor: string) => void;
@@ -322,6 +378,12 @@ function BrandRow({
     <li className="p-4">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="font-semibold text-on-surface">{brand.name}</span>
+
+        {showCategory ? (
+          <span className="rounded bg-surface-container px-1.5 py-0.5 text-xs text-on-surface-muted">
+            {brand.category_group} / {brand.category_name}
+          </span>
+        ) : null}
 
         {brand.locked ? (
           <span className="inline-flex items-center gap-1 rounded bg-surface-container px-1.5 py-0.5 text-xs text-on-surface-muted ring-1 ring-inset ring-outline">
@@ -456,8 +518,15 @@ function BrandRow({
 
       {brand.notes ? <p className="mt-1 text-xs text-on-surface-variant">{brand.notes}</p> : null}
 
-      {/* Models matter for common brands; a rare brand is worth it whatever the model. */}
-      {brand.tier === 'common' ? (
+      {/* Models on every tier, not only common.
+        *
+        * They read differently depending on the tier, and that is fine: under a common
+        * brand a model is the buying rule, and under a rare one it is a record of what the
+        * brand has been seen selling and for how much. Hiding them on rare brands used to
+        * be justified as "the label already decided" — but the list is also what you need
+        * in order to move a brand to common later, and a brand with nothing recorded cannot
+        * tell you what to look for. Shown whenever there is something to show. */}
+      {models.length || brand.tier === 'common' ? (
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           {models.map((model) => (
             <button
